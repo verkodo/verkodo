@@ -5,6 +5,7 @@
 /web/node_modules
 /crates/verkodo-web/web
 /web/src/lib/verkodo.wasm
+/web/dist-pages
 
 # Lean: Mathlib and its build (`lake exe cache get` in lean/), the files `verkodo prove` generates; HTML from
 # `verkodo render`.

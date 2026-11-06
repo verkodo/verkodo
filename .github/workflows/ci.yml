@@ -51,6 +51,7 @@ jobs:
           pnpm wasm
           pnpm check
           pnpm build
+          pnpm build:pages
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets
       - run: cargo clippy --locked -p verkodo-wasm --target wasm32-unknown-unknown

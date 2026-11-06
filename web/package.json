@@ -13,11 +13,13 @@
     "wasm": "cargo build --locked -p verkodo-wasm --target wasm32-unknown-unknown --release && cp ../target/wasm32-unknown-unknown/release/verkodo_wasm.wasm src/lib/verkodo.wasm",
     "dev": "vite",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "build": "vite build"
+    "build": "vite build",
+    "build:pages": "vite build --mode pages"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tsconfig/svelte": "5.0.8",
+    "@types/node": "26.6.5",
     "openapi-typescript": "7.13.0",
     "svelte": "5.57.2",
     "svelte-check": "4.7.6",

@@ -83,6 +83,9 @@ Diagnostics appear while typing, hover shows the cards, F12 or Ctrl/⌘-click go
 the outline and a live preview of the pages. It starts with the examples; the files stay in that browser
 (`localStorage`) and are sent nowhere.
 
+The same editor runs [here in the browser]({{ '/editor/' | relative_url }}), published with this documentation
+(`pnpm build:pages`): everything below but Lean, which needs a `verkodo serve --lean` on your own device.
+
 It works like an IDE:
 
 - a toolbar to **check** (the problems of all files, Ctrl/⌘-Shift-M), **compile** with Lean (Ctrl/⌘-Shift-B, see

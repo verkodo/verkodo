@@ -2,7 +2,7 @@
 <!--
   The web editor: .vk files in CodeMirror, checked in the browser by verkodo compiled to WebAssembly – diagnostics
   while typing, hover cards, go to definition (F12 or Ctrl/Cmd-click), an outline and a live preview of the pages.
-  The files stay in this browser (localStorage); nothing is sent anywhere. Lean is not part of it yet.
+  The files stay in this browser (localStorage); only “Check with Lean” sends them – to the verkodo serve it came from.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -60,6 +60,8 @@
   let version = $state(0);
   // Whether the server lets Lean check (`verkodo serve --lean <dir>`), and what Lean is doing.
   let leanAvailable = $state(false);
+  // Built for a static host (`pnpm build:pages`, GitHub Pages): no server, so no API and no Lean.
+  const hosted = import.meta.env.MODE === "pages";
   let proving = $state(false);
   let leanNote = $state("");
   let note = $state("");
@@ -394,7 +396,7 @@
         analyse();
       })
       .catch((e) => (failure = String(e)));
-    api
+    if (!hosted) api
       .GET("/api/v1/lean")
       .then(({ data }) => (leanAvailable = data?.available ?? false))
       .catch(() => (leanAvailable = false));
@@ -445,7 +447,7 @@
         {#if errors + warnings > 0}<span class="count" class:bad={errors > 0}>{errors + warnings}</span>{/if}
       </button>
       <button class="tool" onclick={prove} disabled={!leanAvailable || proving || !!failure}
-        title={leanAvailable ? t("Mit Lean prüfen (Strg/⌘-Umschalt-B)", "Check with Lean (Ctrl/⌘-Shift-B)") : t("Lean ist auf diesem Server aus (verkodo serve --lean <dir>)", "Lean is off on this server (verkodo serve --lean <dir>)")}>
+        title={leanAvailable ? t("Mit Lean prüfen (Strg/⌘-Umschalt-B)", "Check with Lean (Ctrl/⌘-Shift-B)") : hosted ? t("Lean braucht verkodo serve --lean auf dem eigenen Gerät", "Lean needs verkodo serve --lean on your own device") : t("Lean ist auf diesem Server aus (verkodo serve --lean <dir>)", "Lean is off on this server (verkodo serve --lean <dir>)")}>
         {@html icons.build}<span>{proving ? t("Lean …", "Lean …") : t("Kompilieren", "Compile")}</span>
       </button>
       <button class="tool" onclick={() => toggle("debug")} class:on={bottom === "debug"} title={t("Debug: Normen auswerten (F5)", "Debug: evaluate norms (F5)")}>
@@ -523,7 +525,9 @@
             {/if}
           {:else if bottom === "lean"}
             <div class="lean-panel">
-              {#if !leanAvailable}
+              {#if hosted}
+                <p class="hint">{t("Dieser Editor läuft ganz im Browser – die Dateien bleiben hier, nichts wird gesendet. Lean prüft auf dem eigenen Gerät: „cargo install verkodo“, dann „verkodo serve --lean lean“.", "This editor runs entirely in the browser – the files stay here, nothing is sent. Lean checks on your own device: “cargo install verkodo”, then “verkodo serve --lean lean”.")}</p>
+              {:else if !leanAvailable}
                 <p class="hint">{t("Lean ist auf diesem Server ausgeschaltet. Mit „verkodo serve --lean lean“ prüft Lean die Dateien auf dem Server.", "Lean is switched off on this server. With “verkodo serve --lean lean” Lean checks the files on the server.")}</p>
               {:else}
                 <button class="tool" onclick={prove} disabled={proving || !!failure}>{@html icons.play}<span>{t("Mit Lean prüfen", "Check with Lean")}</span></button>
@@ -622,7 +626,7 @@
       </label>
       <label class="check"><input type="checkbox" bind:checked={settings.wrap} /> {t("Lange Zeilen umbrechen", "Wrap long lines")}</label>
       <div class="row">
-        <span>Lean: {leanAvailable ? t("auf diesem Server eingeschaltet", "switched on on this server") : t("aus (verkodo serve --lean lean)", "off (verkodo serve --lean lean)")}</span>
+        <span>Lean: {hosted ? t("nur mit verkodo serve --lean auf dem eigenen Gerät", "only with verkodo serve --lean on your own device") : leanAvailable ? t("auf diesem Server eingeschaltet", "switched on on this server") : t("aus (verkodo serve --lean lean)", "off (verkodo serve --lean lean)")}</span>
       </div>
       <div class="row">
         <button class="tool" onclick={reset}>{t("Beispiele neu laden", "Load the examples again")}</button>

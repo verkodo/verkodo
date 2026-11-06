@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The documentation site (verkodo.github.io/verkodo, later verkodo.dev): docs/ built with Jekyll and published with GitHub Actions on every change of
-# docs/ on main; on a pull request only built. The workflow comes from falkoss/starterpack, pinned by commit.
+# The site at verkodo.github.io/verkodo (later verkodo.dev): docs/ built with Jekyll as GitHub Pages builds it (remote
+# theme Just the Docs), and the web editor below /editor/ – static, verkodo as WebAssembly, no Lean (`pnpm
+# build:pages`). Published with GitHub Actions on every change on main; on a pull request only built. Like
+# falkoss/starterpack's pages-jekyll.yml, with the editor added. Actions are pinned by commit, with the version as a
+# comment.
 name: Pages
 
 on:
   push:
     branches: [main]
-    paths: ["docs/**", ".github/workflows/pages.yml"]
+    paths: ["docs/**", "web/**", "crates/**", "examples/**", "Cargo.lock", "rust-toolchain.toml", ".github/workflows/pages.yml"]
   pull_request:
-    paths: ["docs/**", ".github/workflows/pages.yml"]
+    paths: ["docs/**", "web/**", "crates/**", "examples/**", "Cargo.lock", "rust-toolchain.toml", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -19,13 +22,51 @@ concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  docs:
-    uses: falkoss/starterpack/.github/workflows/pages-jekyll.yml@2c52b61993152e0f7f3828a628869f1aef62f0f3
-    with:
-      source: docs
-      publish: ${{ github.event_name != 'pull_request' }}
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
+        with:
+          source: ./docs
+          destination: ./_site
+      - name: Rust toolchain from rust-toolchain.toml (with the WebAssembly target)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: The web editor, below /verkodo/editor/
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm wasm
+          pnpm build:pages
+          sudo cp -r dist-pages ../_site/editor
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
     permissions:
-      contents: read
       pages: write
       id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
