@@ -13,6 +13,7 @@ categories = ["command-line-utilities","mathematics"]
 readme = "../../README.md"
 
 [dependencies]
+serde_json.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 verkodo-api.workspace = true

@@ -15,6 +15,27 @@ pub use verkodo_syntax::format::{Options as FormatOptions, Style, format, format
 pub use verkodo_syntax::lexer::spaces_for_tabs;
 pub use verkodo_syntax::{Diagnostic, Severity};
 
+/// Every member of norm `norm` (its id) evaluated for the inputs given as text by name – inputs, constants and rules
+/// with their values, exactly (fractions), as a person reads them; none if there is no such norm.
+pub fn evaluate(
+    sources: &Sources,
+    analysis: &Analysis,
+    norm: &str,
+    inputs: &HashMap<String, String>,
+) -> Option<Vec<(String, String, bool)>> {
+    let &n = analysis.by_id.get(norm).filter(|&&n| analysis.symbols[n].kind == SymKind::Norm)?;
+    Some(
+        verkodo_core::eval::evaluate(sources, analysis, n, inputs)
+            .into_iter()
+            .map(|s| {
+                let name = analysis.symbols[s.sym].id.rsplit('.').next().unwrap_or_default().to_string();
+                let known = !matches!(s.value, verkodo_core::eval::Value::Unknown(_));
+                (name, s.value.show(analysis), known)
+            })
+            .collect(),
+    )
+}
+
 /// The label of a declaration in `lang` (else English, else the first), or the last part of its id.
 pub fn label(sources: &Sources, analysis: &Analysis, sym: usize, lang: &str) -> String {
     analysis

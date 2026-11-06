@@ -80,6 +80,25 @@ enum Command {
         #[arg(long)]
         fonts: Option<PathBuf>,
     },
+    /// Evaluates a norm for given inputs and prints every member with its value – exactly, as fractions.
+    Eval {
+        #[command(flatten)]
+        input: Input,
+        /// The norm, by its id (`de.ustg.p19.small_business`).
+        #[arg(long)]
+        norm: String,
+        /// An input as `name=value` (repeatable): `true`, `40000`, `2026-02-28`, a value of an enumeration by name,
+        /// records and lists as JSON.
+        #[arg(long = "set", value_name = "NAME=VALUE")]
+        set: Vec<String>,
+        /// Many cases at once: a file with one JSON object of inputs per line (values as strings or JSON); prints one
+        /// JSON object of results per line.
+        #[arg(long)]
+        cases: Option<PathBuf>,
+        /// Prints one JSON object (name → value) instead of lines.
+        #[arg(long)]
+        json: bool,
+    },
     /// How far each language of the translation files is: texts translated of those written, and which are missing.
     Translations {
         #[command(flatten)]
@@ -182,6 +201,44 @@ fn main() -> anyhow::Result<ExitCode> {
             Ok(())
         }),
         Command::Fmt { input, style, width, check } => fmt(&input.paths, style.as_deref(), width, check),
+        Command::Eval { input, norm, set, cases, json } => {
+            knowledge_command(&input.paths, None, |sources, analysis, _| {
+                let run = |inputs: &std::collections::HashMap<String, String>| {
+                    knowledge::evaluate(sources, analysis, &norm, inputs)
+                        .ok_or_else(|| anyhow::anyhow!("no norm `{norm}`"))
+                };
+                let as_json = |values: &[(String, String, bool)]| {
+                    serde_json::Value::Object(
+                        values.iter().map(|(k, v, _)| (k.clone(), serde_json::Value::String(v.clone()))).collect(),
+                    )
+                };
+                if let Some(file) = &cases {
+                    for line in std::fs::read_to_string(file)?.lines().filter(|l| !l.trim().is_empty()) {
+                        let obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(line)?;
+                        let inputs = obj
+                            .into_iter()
+                            .map(|(k, v)| (k, if let serde_json::Value::String(s) = v { s } else { v.to_string() }))
+                            .collect();
+                        println!("{}", as_json(&run(&inputs)?));
+                    }
+                    return Ok(());
+                }
+                let mut inputs = std::collections::HashMap::new();
+                for kv in &set {
+                    let (k, v) = kv.split_once('=').ok_or_else(|| anyhow::anyhow!("`{kv}`: write name=value"))?;
+                    inputs.insert(k.trim().to_string(), v.trim().to_string());
+                }
+                let values = run(&inputs)?;
+                if json {
+                    println!("{}", as_json(&values));
+                } else {
+                    for (name, value, known) in &values {
+                        println!("{name} = {value}{}", if *known { "" } else { "  (not known)" });
+                    }
+                }
+                Ok(())
+            })
+        }
         Command::Lsp => {
             verkodo_lsp::stdio().map_err(|e| anyhow::anyhow!(e))?;
             Ok(ExitCode::SUCCESS)

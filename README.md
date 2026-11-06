@@ -31,6 +31,7 @@ this repository:
 cargo run -- check examples              # parse, resolve and check
 cargo run -- graph examples              # every declaration and what it refers to
 cargo run -- prove examples              # Lean checks definitions, bridges and proofs
+cargo run -- eval examples --norm estg.p32a.income_tax --set taxable_income=40000   # a norm for given inputs
 cargo run -- render examples -o out --lang de --prove   # HTML with nested hover and Lean's verdict; or --lang en
 cargo run -- pdf examples --path guide -o out --prove  # a path as PDF through Typst; every term links to its explanation
 cargo run -- lsp                         # the language server for editors (docs/editors.md)

@@ -29,7 +29,7 @@ Next: OPEN.
 | `crates/verkodo-sdk` | the SDK: every command and query (reading files, Lean, rendering, formatting, hover: `knowledge`); the **only** layer the interfaces – and IDEs – use |
 | `crates/verkodo-api` | HTTP/JSON with axum, described in OpenAPI by utoipa: `GET /api/v1/lean`, `POST /api/v1/prove` (Lean for the web editor when `serve --lean <dir>`) |
 | `crates/verkodo-web` | the web editor, built by `pnpm build` into `crates/verkodo-web/web` (ignored by git, part of the crate) and served around the API: CSP with a nonce per page |
-| `crates/verkodo` | the command line: `check`, `graph`, `prove`, `render`, `pdf`, `fmt`, `translations`, `lsp`, `serve`, `openapi` |
+| `crates/verkodo` | the command line: `check`, `graph`, `prove`, `render`, `pdf`, `fmt`, `eval`, `translations`, `lsp`, `serve`, `openapi` |
 | `examples/` | example knowledge: a slice of Analysis I (with a French translation), a simplified § 19 UStG, the scale of § 32a EStG (CC BY 4.0) |
 | `lean/` | the Lean project (Lean 4, Mathlib, pinned); `lake exe cache get` there once; generated files in `lean/generated/` |
 | `web/` | the web app: the editor (CodeMirror 6, verkodo as WebAssembly – `pnpm wasm` builds it); Vite, Svelte 5, TypeScript; types from `api/openapi.json` (openapi-typescript, openapi-fetch); `pnpm build:pages` builds it static, without Lean, for verkodo.github.io/verkodo/editor/ (`.github/workflows/pages.yml`) |
