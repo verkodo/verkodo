@@ -3,6 +3,8 @@
   The web editor: .vk files in CodeMirror, checked in the browser by verkodo compiled to WebAssembly – diagnostics
   while typing, hover cards, go to definition (F12 or Ctrl/Cmd-click), an outline and a live preview of the pages.
   The files stay in this browser (localStorage); only “Check with Lean” sends them – to the verkodo serve it came from.
+  Files and folders are opened from the device (or dropped on the editor) and saved back as downloads – one file, or
+  all of them as a ZIP archive.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -22,6 +24,7 @@
   import { Verkodo, type GoalsAt, type Loaded, type SourceFile } from "./lib/verkodo";
   import { api } from "./lib/api";
   import { icons } from "./lib/icons";
+  import { download, readFiles, zip } from "./lib/files";
   import { settings, saveSettings, applyTheme, type Theme } from "./lib/settings.svelte";
   import Modal from "./Modal.svelte";
   import Debug from "./Debug.svelte";
@@ -83,7 +86,7 @@
   let frame = $state<HTMLIFrameElement>();
   let view: EditorView | null = null;
   // One editor state per file, so that each keeps its undo history.
-  let states: EditorState[] = [];
+  let states: (EditorState | undefined)[] = [];
   // What the settings change in the editor: line wrapping and the size of the font.
   const wrapping = new Compartment();
   const fontSize = new Compartment();
@@ -109,6 +112,9 @@
     ["F5", "Debug: Normen auswerten", "Debug: evaluate norms"],
     ["Strg/⌘-Umschalt-G", "Lean-Ziele am Cursor", "Lean goals at the cursor"],
     ["Strg/⌘-Umschalt-M", "Probleme", "Problems"],
+    ["Strg/⌘-O", "Dateien öffnen", "Open files"],
+    ["Strg/⌘-S", "Datei speichern (herunterladen)", "Save the file (download)"],
+    ["Strg/⌘-Umschalt-S", "Alle Dateien als ZIP speichern", "Save all files as ZIP"],
     ["Strg/⌘-,", "Einstellungen", "Settings"],
     ["F1", "Diese Übersicht", "This overview"],
     ["Strg/⌘-/", "Kommentar ein/aus", "Toggle comment"],
@@ -244,6 +250,9 @@
     else if (mod && e.shiftKey && e.key.toLowerCase() === "m") toggle("problems");
     else if (mod && e.shiftKey && e.key.toLowerCase() === "g") toggle("goals");
     else if (mod && e.key === ",") dialog = "settings";
+    else if (mod && !e.shiftKey && e.key.toLowerCase() === "o") picker?.click();
+    else if (mod && e.shiftKey && e.key.toLowerCase() === "s") saveAll();
+    else if (mod && e.key.toLowerCase() === "s") saveFile();
     else if (e.altKey && e.shiftKey && e.code === "KeyF") format();
     else return false;
     e.preventDefault();
@@ -334,8 +343,8 @@
 
   function switchTo(i: number) {
     if (!view || i === current) return;
-    if (settings.formatOnSwitch) format();
-    states[current] = view.state;
+    if (current >= 0 && settings.formatOnSwitch) format();
+    if (current >= 0) states[current] = view.state;
     current = i;
     view.setState(stateFor(i));
     applyEditorSettings();
@@ -363,6 +372,71 @@
     save();
     switchTo(files.length - 1);
     analyse();
+  }
+
+  let picker = $state<HTMLInputElement>();
+  let folderPicker = $state<HTMLInputElement>();
+
+  /** Adds opened files; a file with the same path is replaced – after asking, if it differs. */
+  async function openFiles(list: FileList | null | undefined) {
+    if (!list) return;
+    const opened = await readFiles(list);
+    if (opened.length === 0) {
+      alert(t("Keine .vk-Datei gewählt.", "No .vk file chosen."));
+      return;
+    }
+    const changed = opened.filter((o) => files.some((f) => f.path === o.path && f.text !== o.text));
+    if (changed.length > 0 && !confirm(t(
+      `${changed.length} Datei(en) gibt es hier schon mit anderem Inhalt – ersetzen?`,
+      `${changed.length} file(s) are here already with other content – replace them?`,
+    ))) return;
+    let last = current;
+    for (const o of opened) {
+      const i = files.findIndex((f) => f.path === o.path);
+      if (i >= 0) {
+        files[i] = o;
+        states[i] = undefined;
+        last = i;
+      } else {
+        files.push(o);
+        last = files.length - 1;
+      }
+    }
+    save();
+    states[current] = undefined;
+    current = -1;
+    switchTo(last);
+    analyse();
+  }
+
+  function saveFile() {
+    const f = files[current];
+    if (f) download(f.path.split("/").pop() ?? "file.vk", new Blob([f.text], { type: "text/plain;charset=utf-8" }));
+  }
+
+  function saveAll() {
+    download("verkodo.zip", zip(files));
+  }
+
+  /** Takes a file out of the editor – it stays on the device where it came from. */
+  function closeFile(i: number) {
+    if (files.length === 1) return;
+    if (!confirm(t(`„${files[i]!.path}“ aus dem Editor entfernen?`, `Remove “${files[i]!.path}” from the editor?`))) return;
+    if (view) states[current] = view.state;
+    files.splice(i, 1);
+    states.splice(i, 1);
+    const next = Math.min(i <= current ? Math.max(current - 1, 0) : current, files.length - 1);
+    current = -1;
+    save();
+    switchTo(next);
+    analyse();
+  }
+
+  let dragging = $state(false);
+  function drop(e: DragEvent) {
+    e.preventDefault();
+    dragging = false;
+    void openFiles(e.dataTransfer?.files);
   }
 
   function setTheme(theme: Theme) {
@@ -428,18 +502,34 @@
 
 <svelte:head><meta name="color-scheme" content={settings.theme === "system" ? "light dark" : settings.theme} /></svelte:head>
 
-<div class="editor">
+<div class="editor" class:dragging role="application"
+  ondragover={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
+  ondragleave={(e) => { if (e.currentTarget === e.target) dragging = false; }}
+  ondrop={drop}>
   <header>
     <strong class="brand">verkodo</strong>
     <nav class="files">
       {#each files as f, i (f.path)}
-        <button class="tab" class:active={i === current} onclick={() => switchTo(i)} title={f.path}>
-          {f.path.split("/").pop()}
-          {#if loaded.diagnostics.some((d) => d.file === i && d.severity === "error")}<span class="dot"></span>{/if}
-        </button>
+        <span class="file" class:active={i === current}>
+          <button class="tab" class:active={i === current} onclick={() => switchTo(i)} title={f.path}>
+            {f.path.split("/").pop()}
+            {#if loaded.diagnostics.some((d) => d.file === i && d.severity === "error")}<span class="dot"></span>{/if}
+          </button>
+          {#if i === current && files.length > 1}
+            <button class="close" onclick={() => closeFile(i)} title={t("Aus dem Editor entfernen", "Remove from the editor")}>{@html icons.close}</button>
+          {/if}
+        </span>
       {/each}
       <button class="tab" onclick={newFile} title={t("Neue Datei", "New file")}>+</button>
     </nav>
+    <input bind:this={picker} type="file" accept=".vk" multiple hidden onchange={(e) => { void openFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
+    <input bind:this={folderPicker} type="file" webkitdirectory multiple hidden onchange={(e) => { void openFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
+    <div class="tools files-tools">
+      <button class="icon" onclick={() => picker?.click()} title={t("Dateien öffnen (Strg/⌘-O) – Umschalt-Klick: Ordner", "Open files (Ctrl/⌘-O) – Shift-click: a folder")}
+        onclickcapture={(e) => { if (e.shiftKey) { e.stopPropagation(); folderPicker?.click(); } }}>{@html icons.open}</button>
+      <button class="icon" onclick={saveFile} title={t("Datei speichern (Strg/⌘-S) – Umschalt-Klick: alle als ZIP", "Save the file (Ctrl/⌘-S) – Shift-click: all as ZIP")}
+        onclickcapture={(e) => { if (e.shiftKey) { e.stopPropagation(); saveAll(); } }}>{@html icons.save}</button>
+    </div>
     <div class="tools">
       <button class="tool" onclick={() => toggle("problems")} class:on={bottom === "problems"}
         title={t("Prüfen: Probleme (Strg/⌘-Umschalt-M)", "Check: problems (Ctrl/⌘-Shift-M)")}>
@@ -703,6 +793,27 @@
   }
   .tab {
     padding: 0.2rem 0.55rem;
+  }
+  .file {
+    display: inline-flex;
+    align-items: center;
+  }
+  .close {
+    display: inline-flex;
+    padding: 0.1rem;
+    margin-left: -0.3rem;
+    opacity: 0.7;
+  }
+  .close :global(svg) {
+    width: 13px;
+    height: 13px;
+  }
+  .files-tools {
+    margin-left: 0;
+  }
+  .editor.dragging {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
   }
   .tab.active,
   .tool.on,

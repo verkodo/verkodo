@@ -81,7 +81,10 @@ vim.lsp.enable("verkodo")
 verkodo itself, compiled to WebAssembly – the same parser, analysis and hover cards as above, without a server.
 Diagnostics appear while typing, hover shows the cards, F12 or Ctrl/⌘-click goes to a definition, a side panel shows
 the outline and a live preview of the pages. It starts with the examples; the files stay in that browser
-(`localStorage`) and are sent nowhere.
+(`localStorage`) and are sent nowhere. Files and folders are opened from the device – with the folder button
+(Ctrl/⌘-O; Shift-click for a whole folder) or by dropping them on the editor – and saved back as downloads: the file
+in front (Ctrl/⌘-S) or all of them as a ZIP archive (Ctrl/⌘-Shift-S). A file is taken out of the editor with the
+cross on its tab; it stays where it came from.
 
 The same editor runs [here in the browser]({{ '/editor/' | relative_url }}), published with this documentation
 (`pnpm build:pages`): everything below but Lean, which needs a `verkodo serve --lean` on your own device.
