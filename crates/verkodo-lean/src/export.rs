@@ -203,6 +203,94 @@ fn fractional(e: &Expr) -> bool {
     }
 }
 
+/// Words Lean reserves: a name of verkodo that is one is written `«…»` in Lean.
+const LEAN_KEYWORDS: &[&str] = &[
+    "at",
+    "by",
+    "do",
+    "else",
+    "end",
+    "fun",
+    "from",
+    "have",
+    "if",
+    "in",
+    "let",
+    "match",
+    "then",
+    "with",
+    "where",
+    "open",
+    "namespace",
+    "section",
+    "theorem",
+    "lemma",
+    "def",
+    "example",
+    "instance",
+    "structure",
+    "inductive",
+    "class",
+    "import",
+    "export",
+    "universe",
+    "variable",
+    "show",
+    "calc",
+    "mut",
+    "for",
+    "unless",
+    "return",
+    "try",
+    "catch",
+    "finally",
+    "break",
+    "continue",
+    "deriving",
+    "attribute",
+    "local",
+    "private",
+    "protected",
+    "noncomputable",
+    "partial",
+    "unsafe",
+    "macro",
+    "syntax",
+    "notation",
+    "axiom",
+    "opaque",
+    "abbrev",
+    "this",
+    "Type",
+    "Prop",
+    "Sort",
+    "forall",
+    "exists",
+    "suffices",
+    "obtain",
+    "nomatch",
+    "nofun",
+    "termination_by",
+    "decreasing_by",
+    "mutual",
+    "omit",
+    "include",
+    "extends",
+    "λ",
+    "Π",
+    "Σ",
+];
+
+/// A name as Lean reads it.
+fn ident(name: &str) -> String {
+    if LEAN_KEYWORDS.contains(&name) { format!("«{name}»") } else { name.to_string() }
+}
+
+/// A dotted name as Lean reads it, each part on its own.
+fn dotted(name: &str) -> String {
+    name.split('.').map(ident).collect::<Vec<_>>().join(".")
+}
+
 /// The Lean name of a variable of an aggregate – apart from the inputs `i` of a rule.
 fn local(name: &str) -> String {
     format!("v_{name}")
@@ -287,8 +375,8 @@ impl Gen<'_> {
     fn name(&self, sym: usize) -> String {
         let id = &self.a.symbols[sym].id;
         match id.strip_prefix(&format!("{}.", self.module)) {
-            Some(rel) => rel.to_string(),
-            None => format!("_root_.{id}"),
+            Some(rel) => dotted(rel),
+            None => format!("_root_.{}", dotted(id)),
         }
     }
 
@@ -351,7 +439,7 @@ impl Gen<'_> {
         for d in deps {
             self.foreign_module(d);
         }
-        self.code.push_str(&format!("namespace {}\n\n", self.module));
+        self.code.push_str(&format!("namespace {}\n\n", dotted(&self.module)));
         let me = self.module.clone();
         for it in &ast.items {
             if let Item::Concept(c) = it {
@@ -370,7 +458,7 @@ impl Gen<'_> {
                 self.path(ast, p);
             }
         }
-        self.code.push_str(&format!("end {me}\n"));
+        self.code.push_str(&format!("end {}\n", dotted(&me)));
     }
 
     fn sym(&self, id: &str) -> Option<usize> {
@@ -663,13 +751,13 @@ impl Gen<'_> {
         let (own_file, own_module) = (self.file, std::mem::replace(&mut self.module, module.clone()));
         self.file = file;
         self.foreign = true;
-        self.code.push_str(&format!("-- from module `{module}`\nnamespace {module}\n\n"));
+        self.code.push_str(&format!("-- from module `{module}`\nnamespace {}\n\n", dotted(&module)));
         let ast = &self.ws.asts[file];
         self.types(ast);
         for n in self.norms_in_order(ast) {
             self.norm(n);
         }
-        self.code.push_str(&format!("end {module}\n\n"));
+        self.code.push_str(&format!("end {}\n\n", dotted(&module)));
         self.foreign = false;
         self.file = own_file;
         self.module = own_module;
@@ -695,10 +783,11 @@ impl Gen<'_> {
         for it in &ast.items {
             let Item::Enum(e) = it else { continue };
             let Some(s) = self.sym(&id(&e.name)) else { continue };
-            let values: String = e.values.iter().map(|v| format!("  | {}\n", v.name.text)).collect();
+            let values: String = e.values.iter().map(|v| format!("  | {}\n", ident(&v.name.text))).collect();
             let text = format!(
                 "/-- verkodo: `{}` -/\ninductive {} where\n{values}  deriving DecidableEq, Repr",
-                self.a.symbols[s].id, e.name.text
+                self.a.symbols[s].id,
+                ident(&e.name.text)
             );
             self.decl(Key::Member(s), &text);
         }
@@ -739,13 +828,16 @@ impl Gen<'_> {
                         Some(format!(
                             "  /-- verkodo: `{}` -/\n  {} : {}\n",
                             self.a.symbols[fs].id,
-                            f.name.text,
+                            ident(&f.name.text),
                             self.lean_ty(t)
                         ))
                     })
                     .collect();
-                let text =
-                    format!("/-- verkodo: `{}` -/\nstructure {} where\n{fields}", self.a.symbols[s].id, r.name.text);
+                let text = format!(
+                    "/-- verkodo: `{}` -/\nstructure {} where\n{fields}",
+                    self.a.symbols[s].id,
+                    ident(&r.name.text)
+                );
                 self.decl(Key::Member(s), &text);
             }
             if done.len() == before {
@@ -813,7 +905,7 @@ impl Gen<'_> {
             }
             return;
         }
-        self.code.push_str(&format!("-- norm `{}`\nnamespace {}\n\n", n.name.text, n.name.text));
+        self.code.push_str(&format!("-- norm `{}`\nnamespace {}\n\n", n.name.text, ident(&n.name.text)));
         let ty = |s: usize| self.a.member_types.get(&s).copied().unwrap_or(Ty::Unknown);
         let fields: String = members
             .iter()
@@ -824,7 +916,7 @@ impl Gen<'_> {
                 format!(
                     "  /-- verkodo: `{}`{what} -/\n  {} : {}\n",
                     self.a.symbols[*s].id,
-                    m.name.text,
+                    ident(&m.name.text),
                     self.lean_ty(ty(*s))
                 )
             })
@@ -853,7 +945,7 @@ impl Gen<'_> {
         );
         for (s, m) in self.member_order(&members) {
             let t = ty(s);
-            let (name, lt, id) = (&m.name.text, self.lean_ty(t), &self.a.symbols[s].id);
+            let (name, lt, id) = (&ident(&m.name.text), self.lean_ty(t), &self.a.symbols[s].id);
             let want = want_of(t);
             let text = match &m.kind {
                 MemberKind::Input | MemberKind::Judgement { .. } => continue,
@@ -876,7 +968,7 @@ impl Gen<'_> {
             };
             self.decl(Key::Member(s), &text);
         }
-        self.code.push_str(&format!("end {}\n\n", n.name.text));
+        self.code.push_str(&format!("end {}\n\n", ident(&n.name.text)));
     }
 
     /// Why a norm cannot be exported yet, if it cannot.
@@ -1023,12 +1115,12 @@ impl Gen<'_> {
     fn reference(&self, p: &Path) -> String {
         let base = match self.a.refs.get(&(self.file, p.span)) {
             Some(Target::Symbol(s)) => {
-                let short = self.a.symbols[*s].id.rsplit('.').next().unwrap_or_default();
+                let short = ident(self.a.symbols[*s].id.rsplit('.').next().unwrap_or_default());
                 match self.a.symbols[*s].kind {
                     SymKind::Input | SymKind::Judgement => format!("i.{short}"),
                     SymKind::Rule => format!("({short} i)"),
                     // A constant of this norm, by its short name; of another norm, by its path.
-                    SymKind::Constant if p.segments.len() == 1 => short.to_string(),
+                    SymKind::Constant if p.segments.len() == 1 => short,
                     _ => self.name(*s),
                 }
             }
@@ -1036,9 +1128,9 @@ impl Gen<'_> {
             _ => "sorry".into(),
         };
         match self.a.fields.get(&(self.file, p.span)) {
-            Some(fields) => fields
-                .iter()
-                .fold(base, |acc, &f| format!("{acc}.{}", self.a.symbols[f].id.rsplit('.').next().unwrap_or_default())),
+            Some(fields) => fields.iter().fold(base, |acc, &f| {
+                format!("{acc}.{}", ident(self.a.symbols[f].id.rsplit('.').next().unwrap_or_default()))
+            }),
             None => base,
         }
     }
@@ -1074,7 +1166,7 @@ impl Gen<'_> {
                             }
                             _ => None,
                         };
-                        format!("{} := {}", name.text, self.conv(x, want))
+                        format!("{} := {}", ident(&name.text), self.conv(x, want))
                     })
                     .collect();
                 format!("({} {{ {} }})", self.name(*target), fields.join(", "))
@@ -1383,6 +1475,18 @@ mod tests {
         assert!(u.contains("(((↑i.years : ℚ) / (4 : ℚ)) + (0.5 : ℚ))"), "{u}");
         assert!(u.contains("(_root_.b.total.s { supplies := i.supplies })"), "{u}");
         assert!(u.contains("(verkodo.add_months (20119 : ℤ) i.years)"), "{u}");
+    }
+
+    #[test]
+    fn writes_names_lean_reserves_in_guillemets() {
+        let src = "module m\nenum state { value by value bb }\nnorm n { input end : date input at : state rule ok : bool = at == state.by and end > 2025-01-01 }";
+        let ws = Sources::from_sources(vec![("m.vk".into(), src.into())]);
+        let a = analyze(&ws);
+        assert!(a.diags.is_empty(), "{:?}", a.diags);
+        let code = &export(&ws, &a).0[0].code;
+        assert!(code.contains("  | «by»\n"), "{code}");
+        assert!(code.contains("  «end» : ℤ\n  /-- verkodo: `m.n.at` -/\n  «at» : state"), "{code}");
+        assert!(code.contains("((i.«at» == state.«by») && decide (i.«end» > (20089 : ℤ)))"), "{code}");
     }
 
     #[test]
