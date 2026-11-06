@@ -101,7 +101,45 @@ fn build(events: &[Event], at: &mut usize) -> Block {
     b
 }
 
-const CURRENCIES: &[&str] = &["EUR"];
+/// Words that end an expression or continue the declaration around it: a number followed by one of these is not an
+/// amount of a unit (`if x > 5 then …`).
+const KEYWORDS: &[&str] = &[
+    "and",
+    "or",
+    "not",
+    "if",
+    "then",
+    "else",
+    "unless",
+    "when",
+    "default",
+    "by",
+    "up",
+    "to",
+    "otherwise",
+    "for",
+    "in",
+    "where",
+    "label",
+    "source",
+    "text",
+    "criteria",
+    "input",
+    "judgement",
+    "constant",
+    "rule",
+    "obligation",
+    "permission",
+    "prohibition",
+    "value",
+    "field",
+    "valid",
+    "from",
+    "replaces",
+    "step",
+    "true",
+    "false",
+];
 
 struct Parser<'a> {
     toks: Vec<Token>,
@@ -364,8 +402,13 @@ impl Parser<'_> {
                 Tok::Ident(k) if k == "remark" => self.remark().map(Item::Remark),
                 Tok::Ident(k) if k == "norm" => self.norm().map(Item::Norm),
                 Tok::Ident(k) if k == "path" => self.path_decl().map(Item::Path),
+                Tok::Ident(k) if k == "enum" => self.enum_decl().map(Item::Enum),
+                Tok::Ident(k) if k == "unit" => self.unit_decl().map(Item::Unit),
+                Tok::Ident(k) if k == "record" => self.record_decl().map(Item::Record),
                 _ => {
-                    self.unexpected("a file (expected concept, theorem, example, remark, norm or path)");
+                    self.unexpected(
+                        "a file (expected concept, theorem, example, remark, norm, path, enum, unit or record)",
+                    );
                     continue;
                 }
             };
@@ -600,12 +643,12 @@ impl Parser<'_> {
         };
         // An obligation, permission or prohibition is a truth value: whether it applies.
         let ty = if modality.is_some() {
-            Name { text: "bool".into(), span: name.span }
+            TypeRef::builtin("bool", name.span)
         } else {
             if !self.expect(&Tok::Colon, "`:` and a type") {
                 return None;
             }
-            self.name()?
+            self.type_ref()?
         };
         let mut meta = Meta::default();
         let kind = match &kw.tok {
@@ -635,11 +678,22 @@ impl Parser<'_> {
                 } else {
                     let mut default = None;
                     let mut unless = Vec::new();
+                    // A table: `by <subject>` and its rows.
+                    let mut table: Option<(Span, Table)> = None;
                     self.block(level, |p| {
                         if p.meta(&mut meta) {
                         } else if p.at_kw("default") || (modality.is_some() && p.at_kw("when")) {
                             p.bump();
                             default = Some(p.expr());
+                        } else if p.at_kw("by") {
+                            let start = p.bump().span;
+                            let subject = p.expr();
+                            if table.is_some() {
+                                p.error(start, "a rule has one table: one `by`");
+                            }
+                            table = Some((start, Table { subject, rows: Vec::new(), otherwise: None }));
+                        } else if p.at_kw("up") || p.at_kw("otherwise") || p.at_row() {
+                            p.row(&mut table);
                         } else if p.at_kw("unless") {
                             let start = p.bump().span;
                             let unless_level = p.level();
@@ -651,10 +705,18 @@ impl Parser<'_> {
                             u.span = start.to(end);
                             unless.push(u);
                         } else {
-                            let what = if modality.is_some() { "when" } else { "default" };
+                            let what = if modality.is_some() { "when" } else { "default, by" };
                             p.unexpected(&format!("a rule (expected label, source, {what} or unless)"));
                         }
                     });
+                    if let Some((start, tbl)) = table {
+                        if default.is_some() {
+                            self.error(start, "a rule has a default or a table (`by`), not both");
+                        }
+                        let end = tbl.rows.last().map(|r| r.span).or(tbl.otherwise.as_ref().map(|o| o.span));
+                        let span = start.to(end.unwrap_or(tbl.subject.span));
+                        default = Some(Expr { kind: ExprKind::Table(Box::new(tbl)), span });
+                    }
                     MemberKind::Rule { default, unless }
                 }
             }
@@ -679,6 +741,127 @@ impl Parser<'_> {
         });
         d.span = start.to(end);
         Some(d)
+    }
+
+    /// `[list] <type>`.
+    fn type_ref(&mut self) -> Option<TypeRef> {
+        let start = self.span();
+        let list = self.at_kw("list");
+        if list {
+            self.bump();
+        }
+        let name = self.path()?;
+        let span = start.to(name.span);
+        Some(TypeRef { list, name, span })
+    }
+
+    /// `enum <name> { label … value <name> [{ label … }] … }`.
+    fn enum_decl(&mut self) -> Option<EnumDecl> {
+        let start = self.bump().span;
+        let level = self.level();
+        let name = self.name()?;
+        let mut e = EnumDecl { name, meta: Meta::default(), values: Vec::new(), span: start };
+        let end = self.block(level, |p| {
+            if p.meta(&mut e.meta) {
+            } else if p.at_kw("value") {
+                let kw = p.bump();
+                if let Some(name) = p.name() {
+                    let mut meta = Meta::default();
+                    let end = p.opt_meta_block(kw.line_indent, &mut meta).unwrap_or(name.span);
+                    e.values.push(EnumValue { name, meta, span: kw.span.to(end) });
+                }
+            } else {
+                p.unexpected("an enumeration (expected label, source or value)");
+            }
+        });
+        e.span = start.to(end);
+        Some(e)
+    }
+
+    /// `unit <name> [{ label … }]`.
+    fn unit_decl(&mut self) -> Option<UnitDecl> {
+        let start = self.bump().span;
+        let level = self.level();
+        let name = self.name()?;
+        let mut meta = Meta::default();
+        let end = self.opt_meta_block(level, &mut meta).unwrap_or(name.span);
+        Some(UnitDecl { name, meta, span: start.to(end) })
+    }
+
+    /// `record <name> { label … field <name> : <type> [{ label … }] … }`.
+    fn record_decl(&mut self) -> Option<RecordDecl> {
+        let start = self.bump().span;
+        let level = self.level();
+        let name = self.name()?;
+        let mut r = RecordDecl { name, meta: Meta::default(), fields: Vec::new(), span: start };
+        let end = self.block(level, |p| {
+            if p.meta(&mut r.meta) {
+            } else if p.at_kw("field") {
+                let kw = p.bump();
+                let Some(name) = p.name() else { return };
+                if !p.expect(&Tok::Colon, "`:` and a type") {
+                    return;
+                }
+                let Some(ty) = p.type_ref() else { return };
+                let mut meta = Meta::default();
+                let end = p.opt_meta_block(kw.line_indent, &mut meta).unwrap_or(ty.span);
+                r.fields.push(RecordField { name, ty, meta, span: kw.span.to(end) });
+            } else {
+                p.unexpected("a record (expected label, source or field)");
+            }
+        });
+        r.span = start.to(end);
+        Some(r)
+    }
+
+    /// Whether a row keyed by a value starts here: `<name>:`.
+    fn at_row(&self) -> bool {
+        matches!(self.peek(), Tok::Ident(_))
+            && !KEYWORDS.contains(&match self.peek() {
+                Tok::Ident(s) => s.as_str(),
+                _ => "",
+            })
+            && {
+                // A path, then `:`.
+                let mut i = self.pos;
+                while matches!(self.toks[i].tok, Tok::Ident(_))
+                    && self.toks.get(i + 1).is_some_and(|t| t.tok == Tok::Dot)
+                {
+                    i += 2;
+                }
+                self.toks.get(i + 1).is_some_and(|t| t.tok == Tok::Colon)
+            }
+    }
+
+    /// One row of a table: `up to <bound>: <value>`, `<value>: <value>` or `otherwise: <value>`.
+    fn row(&mut self, table: &mut Option<(Span, Table)>) {
+        let start = self.span();
+        let key = if self.at_kw("otherwise") {
+            self.bump();
+            None
+        } else if self.at_kw("up") {
+            self.bump();
+            self.expect_kw("to");
+            Some(RowKey::UpTo(self.expr()))
+        } else {
+            match self.path() {
+                Some(p) => Some(RowKey::Value(p)),
+                None => return,
+            }
+        };
+        self.expect(&Tok::Colon, "`:` and the value");
+        let value = self.expr();
+        let span = start.to(value.span);
+        let Some((_, t)) = table else {
+            self.error(start, "a row of a table belongs after `by <subject>`");
+            return;
+        };
+        match key {
+            None if t.otherwise.is_some() => self.error(start, "a table has one `otherwise`"),
+            None => t.otherwise = Some(value),
+            Some(_) if t.otherwise.is_some() => self.error(start, "`otherwise` is the last row of a table"),
+            Some(key) => t.rows.push(Row { key, value, span }),
+        }
     }
 
     // ---- expressions ----
@@ -781,10 +964,17 @@ impl Parser<'_> {
         match self.peek().clone() {
             Tok::Number(n) => {
                 self.bump();
-                if let Tok::Ident(c) = self.peek()
-                    && CURRENCIES.contains(&c.as_str())
+                if self.at(&Tok::Percent) {
+                    let end = self.bump().span;
+                    return Expr { kind: ExprKind::Percent(n), span: span.to(end) };
+                }
+                // An amount: a currency or a unit right after the number, on the same line.
+                let next = &self.toks[self.pos];
+                if let Tok::Ident(c) = &next.tok
+                    && !next.first
+                    && !KEYWORDS.contains(&c.as_str())
                 {
-                    let cur = Name { text: c.clone(), span: self.span() };
+                    let cur = Name { text: c.clone(), span: next.span };
                     self.bump();
                     let span = span.to(cur.span);
                     return Expr { kind: ExprKind::Money(n, cur), span };
@@ -821,18 +1011,7 @@ impl Parser<'_> {
                     return Expr { kind: ExprKind::Error, span };
                 };
                 if self.at(&Tok::LParen) {
-                    self.bump();
-                    let mut args = Vec::new();
-                    while !self.at(&Tok::RParen) && !self.at(&Tok::Eof) {
-                        args.push(self.expr());
-                        if !self.at(&Tok::Comma) {
-                            break;
-                        }
-                        self.bump();
-                    }
-                    let end = self.span();
-                    self.expect(&Tok::RParen, "`)`");
-                    return Expr { kind: ExprKind::Call(path, args), span: span.to(end) };
+                    return self.call(path, span);
                 }
                 let span = path.span;
                 Expr { kind: ExprKind::Ref(path), span }
@@ -843,6 +1022,72 @@ impl Parser<'_> {
                 Expr { kind: ExprKind::Error, span }
             }
         }
+    }
+
+    /// After `<path>(`: arguments (`min(a, b)`), inputs by name (`norm.rule(x = …, y = …)`) or an aggregate
+    /// (`sum(s.amount for s in supplies where …)`, `count(s in supplies)`).
+    fn call(&mut self, path: Path, span: Span) -> Expr {
+        self.bump();
+        let named =
+            |p: &Self| matches!(p.peek(), Tok::Ident(_)) && p.toks.get(p.pos + 1).is_some_and(|t| t.tok == Tok::Eq);
+        let kind = if named(self) {
+            let mut args = Vec::new();
+            while named(self) {
+                let Some(name) = self.name() else { break };
+                self.bump();
+                args.push((name, self.expr()));
+                if !self.at(&Tok::Comma) {
+                    break;
+                }
+                self.bump();
+            }
+            ExprKind::Apply(path, args)
+        } else if self.at(&Tok::RParen) {
+            ExprKind::Call(path, Vec::new())
+        } else {
+            let first = self.expr();
+            if self.at_kw("for") || self.at_kw("in") {
+                let (body, var) = if self.at_kw("for") {
+                    self.bump();
+                    (Some(first), self.name())
+                } else {
+                    let var = match &first.kind {
+                        ExprKind::Ref(p) if p.segments.len() == 1 => Some(p.segments[0].clone()),
+                        _ => {
+                            self.error(first.span, "expected the name of each element, as in `count(s in supplies)`");
+                            None
+                        }
+                    };
+                    (None, var)
+                };
+                self.expect_kw("in");
+                let list = self.expr();
+                let filter = if self.at_kw("where") {
+                    self.bump();
+                    Some(self.expr())
+                } else {
+                    None
+                };
+                let func = path.segments[0].clone();
+                if path.segments.len() > 1 {
+                    self.error(path.span, "an aggregate is `sum`, `count`, `all` or `any`");
+                }
+                match var {
+                    Some(var) => ExprKind::Aggregate(Box::new(Aggregate { func, body, var, list, filter })),
+                    None => ExprKind::Error,
+                }
+            } else {
+                let mut args = vec![first];
+                while self.at(&Tok::Comma) {
+                    self.bump();
+                    args.push(self.expr());
+                }
+                ExprKind::Call(path, args)
+            }
+        };
+        let end = self.span();
+        self.expect(&Tok::RParen, "`)`");
+        Expr { kind, span: span.to(end) }
     }
 }
 
@@ -908,7 +1153,7 @@ mod tests {
         let Item::Norm(n) = &f.items[0] else { panic!() };
         let kinds: Vec<_> = n.members.iter().map(|m| m.modality).collect();
         assert_eq!(kinds, [None, Some(Modality::Permission), Some(Modality::Prohibition), Some(Modality::Obligation)]);
-        assert_eq!(n.members[2].ty.text, "bool");
+        assert_eq!(n.members[2].ty.text(), "bool");
         assert!(matches!(&n.members[2].kind, MemberKind::Rule { default: Some(_), unless } if unless.len() == 1));
     }
 
@@ -954,12 +1199,26 @@ mod tests {
                             }
                             other => format!("{other:?}").chars().take(5).collect(),
                         };
-                        out += &format!("  {} : {} {} [{}]\n", m.name.text, m.ty.text, kind, labels(&m.meta));
+                        out += &format!("  {} : {} {} [{}]\n", m.name.text, m.ty.text(), kind, labels(&m.meta));
                     }
                 }
                 Item::Path(p) => {
                     let steps: Vec<String> = p.steps.iter().map(|s| s.joined()).collect();
                     out += &format!("path {} {}\n", p.name.text, steps.join(" "));
+                }
+                Item::Enum(e) => {
+                    let values: Vec<String> =
+                        e.values.iter().map(|v| format!("{} [{}]", v.name.text, labels(&v.meta))).collect();
+                    out += &format!("enum {} [{}] {}\n", e.name.text, labels(&e.meta), values.join(" "));
+                }
+                Item::Unit(u) => out += &format!("unit {} [{}]\n", u.name.text, labels(&u.meta)),
+                Item::Record(r) => {
+                    let fields: Vec<String> = r
+                        .fields
+                        .iter()
+                        .map(|f| format!("{} : {} [{}]", f.name.text, f.ty.text(), labels(&f.meta)))
+                        .collect();
+                    out += &format!("record {} [{}] {}\n", r.name.text, labels(&r.meta), fields.join(" "));
                 }
             }
         }
@@ -1044,6 +1303,103 @@ path p
         assert_eq!(content(&parse_ok(indented)), a);
         assert!(a.contains("bridge eps_n filter by\n  rw [Metric.tendsto_atTop]\n  simp only [Real.dist_eq]"), "{a}");
         assert!(a.contains("rule true unless 1 [ src=§ 2]") || a.contains("ok : bool rule true unless 1"), "{a}");
+    }
+
+    #[test]
+    fn reads_data_types_in_both_ways_of_writing() {
+        let braces = r#"module m
+enum residence {
+  label de "Ansässigkeit"
+  value domestic { label de "Inland" }
+  value elsewhere
+}
+unit km { label de "Kilometer" }
+record supply {
+  field amount : money { label de "Entgelt" }
+  field kind : residence
+}
+norm n {
+  input where_ : residence
+  input supplies : list supply
+  input way : km
+  rule total : money = sum(s.amount for s in supplies where s.kind == residence.domestic)
+  rule many : int = count(s in supplies)
+  rule rate : decimal {
+    label de "Satz"
+    by where_
+    domestic: 19 %
+    otherwise: 7 %
+  }
+  rule zone : int {
+    by total
+    up to 12_348 EUR: 0
+    up to 17_799 EUR: 1
+    otherwise: 2
+  }
+  rule far : bool = way > 20 km
+  rule other : money = n.total(supplies = supplies, way = 0 km, where_ = residence.elsewhere)
+}
+"#;
+        let indented = r#"module m
+enum residence
+  label de Ansässigkeit
+  value domestic
+    label de Inland
+  value elsewhere
+unit km
+  label de Kilometer
+record supply
+  field amount : money
+    label de Entgelt
+  field kind : residence
+norm n
+  input where_ : residence
+  input supplies : list supply
+  input way : km
+  rule total : money = sum(s.amount for s in supplies where s.kind == residence.domestic)
+  rule many : int = count(s in supplies)
+  rule rate : decimal
+    label de Satz
+    by where_
+    domestic: 19 %
+    otherwise: 7 %
+  rule zone : int
+    by total
+    up to 12_348 EUR: 0
+    up to 17_799 EUR: 1
+    otherwise: 2
+  rule far : bool = way > 20 km
+  rule other : money = n.total(supplies = supplies, way = 0 km, where_ = residence.elsewhere)
+"#;
+        let f = parse_ok(braces);
+        let a = content(&f);
+        assert_eq!(content(&parse_ok(indented)), a);
+        assert!(a.contains("enum residence [de=Ansässigkeit] domestic [de=Inland] elsewhere []"), "{a}");
+        assert!(a.contains("record supply [] amount : money [de=Entgelt] kind : residence []"), "{a}");
+        assert!(a.contains("supplies : list supply"), "{a}");
+        let Item::Norm(n) = &f.items[3] else { panic!() };
+        let rule = |i: usize| match &n.members[i].kind {
+            MemberKind::Rule { default: Some(d), .. } => d.kind.clone(),
+            _ => panic!(),
+        };
+        assert!(matches!(rule(3), ExprKind::Aggregate(a) if a.func.text == "sum" && a.filter.is_some()));
+        assert!(matches!(rule(4), ExprKind::Aggregate(a) if a.func.text == "count" && a.body.is_none()));
+        let ExprKind::Table(t) = rule(5) else { panic!() };
+        assert!(matches!(&t.rows[0].key, RowKey::Value(p) if p.joined() == "domestic"));
+        assert!(matches!(&t.rows[0].value.kind, ExprKind::Percent(n) if n == "19"));
+        let ExprKind::Table(t) = rule(6) else { panic!() };
+        assert_eq!(t.rows.len(), 2);
+        assert!(t.otherwise.is_some());
+        let ExprKind::Binary(_, _, r) = rule(7) else { panic!() };
+        assert!(matches!(&r.kind, ExprKind::Money(n, u) if n == "20" && u.text == "km"));
+        assert!(matches!(rule(8), ExprKind::Apply(p, args) if p.joined() == "n.total" && args.len() == 3));
+        // A number followed by a keyword is no amount.
+        let f = parse_ok("module m\nnorm n { input x : int rule r : int = if x > 5 then 1 else 2 }");
+        let Item::Norm(n) = &f.items[0] else { panic!() };
+        assert!(matches!(
+            &n.members[1].kind,
+            MemberKind::Rule { default: Some(Expr { kind: ExprKind::If(..), .. }), .. }
+        ));
     }
 
     #[test]

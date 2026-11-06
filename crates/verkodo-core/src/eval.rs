@@ -5,11 +5,14 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use verkodo_syntax::ast::{BinOp, Expr, ExprKind, Item, MemberKind, UnOp};
+use std::collections::BTreeMap;
 
-use crate::analysis::{Analysis, Loc, ROUNDING, SymKind, Target};
-use crate::date::{day_number, from_day_number};
+use verkodo_syntax::ast::{Aggregate, BinOp, Expr, ExprKind, Item, MemberKind, Name, Path, RowKey, Table, UnOp};
+
+use crate::analysis::{Analysis, DATE_PARTS, Loc, ROUNDING, SymKind, Target};
+use crate::date::{self, day_number, from_day_number};
 use crate::sources::Sources;
+use crate::types::Ty;
 
 /// An exact fraction `num / den`, `den > 0`, in lowest terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,8 +70,33 @@ impl Rat {
     fn ceil(self) -> i128 {
         -(-self.num).div_euclid(self.den)
     }
-    fn cmp(self, o: Rat) -> std::cmp::Ordering {
+    /// The whole number, if it is one and fits.
+    fn whole(self) -> Option<i64> {
+        if self.den == 1 { i64::try_from(self.num).ok() } else { None }
+    }
+}
+
+impl Ord for Rat {
+    fn cmp(&self, o: &Rat) -> std::cmp::Ordering {
         (self.num * o.den).cmp(&(o.num * self.den))
+    }
+}
+
+impl PartialOrd for Rat {
+    fn partial_cmp(&self, o: &Rat) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+
+/// The value of a literal – a number, percentage, amount or date (its day number) – if the expression is one.
+pub fn literal(e: &Expr) -> Option<Rat> {
+    match &e.kind {
+        ExprKind::Number(n) | ExprKind::Money(n, _) => Rat::parse(n),
+        ExprKind::Percent(n) => Rat::parse(n)?.div(Rat::int(100)),
+        ExprKind::Date(d) => day_number(d).map(|n| Rat::int(n.into())),
+        ExprKind::Paren(x) => literal(x),
+        ExprKind::Unary(UnOp::Neg, x) => Rat::int(0).sub(literal(x)?),
+        _ => None,
     }
 }
 
@@ -111,8 +139,13 @@ pub enum Value {
     Num(Rat),
     /// A day number.
     Date(i64),
-    /// Not known: an input left open, or what cannot be computed (a reference outside the norm, a division by
-    /// zero, a number too large) – with why.
+    /// A value of an enumeration: its symbol.
+    Enum(usize),
+    /// A record: its fields by name.
+    Record(BTreeMap<String, Value>),
+    List(Vec<Value>),
+    /// Not known: an input left open, or what cannot be computed (a division by zero, a number too large) – with
+    /// why.
     Unknown(String),
 }
 
@@ -122,7 +155,31 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Num(r) => write!(f, "{r}"),
             Value::Date(d) => write!(f, "{}", from_day_number(*d)),
+            Value::Enum(s) => write!(f, "#{s}"),
+            Value::Record(fields) => {
+                let parts: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+                write!(f, "{{{}}}", parts.join(", "))
+            }
+            Value::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|v| v.to_string()).collect();
+                write!(f, "[{}]", parts.join(", "))
+            }
             Value::Unknown(why) => write!(f, "? ({why})"),
+        }
+    }
+}
+
+impl Value {
+    /// As a person reads it: values of enumerations by name.
+    pub fn show(&self, a: &Analysis) -> String {
+        match self {
+            Value::Enum(s) => a.symbols[*s].id.rsplit('.').next().unwrap_or_default().to_string(),
+            Value::Record(fields) => {
+                let parts: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {}", v.show(a))).collect();
+                format!("{{{}}}", parts.join(", "))
+            }
+            Value::List(xs) => format!("[{}]", xs.iter().map(|v| v.show(a)).collect::<Vec<_>>().join(", ")),
+            other => other.to_string(),
         }
     }
 }
@@ -140,7 +197,7 @@ pub struct Step {
 
 /// Every member of a norm with its value, inputs first, then constants and rules in the order they are written.
 pub fn evaluate(ws: &Sources, a: &Analysis, norm: usize, inputs: &HashMap<String, String>) -> Vec<Step> {
-    let mut ev = Eval { ws, a, inputs, memo: HashMap::new(), trace: HashMap::new(), depth: 0 };
+    let mut ev = Eval::new(ws, a, Some(inputs), HashMap::new());
     let members: Vec<usize> = (0..a.symbols.len()).filter(|&m| a.parent(m) == Some(norm)).collect();
     let mut steps: Vec<Step> = members
         .iter()
@@ -159,7 +216,8 @@ pub fn evaluate(ws: &Sources, a: &Analysis, norm: usize, inputs: &HashMap<String
     steps
 }
 
-/// Reads an input as typed in: `true`/`false` (also `ja`/`nein`), a number (`40000.99`, also `40.000,99`), a date.
+/// Reads an input of a built-in type as typed in: `true`/`false` (also `ja`/`nein`), a number (`40000.99`, also
+/// `40.000,99`), a date.
 pub fn parse_input(ty: &str, text: &str) -> Value {
     let t = text.trim();
     if t.is_empty() {
@@ -173,11 +231,66 @@ pub fn parse_input(ty: &str, text: &str) -> Value {
         },
         "date" => day_number(t).map(Value::Date).unwrap_or_else(|| Value::Unknown(format!("`{t}` is not a date"))),
         _ => {
-            let plain = t.trim_end_matches(['€', ' ']).trim_end_matches("EUR").trim();
+            let plain = t.trim_end_matches(['€', ' ', '%']);
+            let plain = plain.split_once(' ').map(|(n, _)| n).unwrap_or(plain).trim_end_matches("EUR").trim();
             // A German number: dots group thousands, the comma is the decimal point.
             let normal = if plain.contains(',') { plain.replace('.', "").replace(',', ".") } else { plain.to_string() };
-            Rat::parse(&normal).map(Value::Num).unwrap_or_else(|| Value::Unknown(format!("`{t}` is not a number")))
+            let percent = t.ends_with('%');
+            match Rat::parse(&normal) {
+                Some(r) if percent => r.div(Rat::int(100)).map(Value::Num).unwrap_or_else(|| unknown("too large")),
+                Some(r) => Value::Num(r),
+                None => Value::Unknown(format!("`{t}` is not a number")),
+            }
         }
+    }
+}
+
+/// Reads an input of any type: built-in types as `parse_input`, a value of an enumeration by its name, records and
+/// lists as JSON (`[{"amount": "100", "kind": "domestic"}]`).
+pub fn parse_value(a: &Analysis, ty: Ty, text: &str) -> Value {
+    let t = text.trim();
+    if t.is_empty() {
+        return Value::Unknown("not given".into());
+    }
+    match ty {
+        Ty::Enum(_) | Ty::Record(_) | Ty::List(_) => {
+            let json = serde_json::from_str(t).unwrap_or_else(|_| serde_json::Value::String(t.to_string()));
+            from_json(a, ty, &json)
+        }
+        Ty::Quantity(_) | Ty::Money | Ty::Decimal | Ty::Int | Ty::Num => parse_input("decimal", t),
+        other => parse_input(other.name(), t),
+    }
+}
+
+fn from_json(a: &Analysis, ty: Ty, j: &serde_json::Value) -> Value {
+    use serde_json::Value as J;
+    match (ty, j) {
+        (Ty::Enum(e), J::String(s)) => {
+            let id = format!("{}.{}", a.symbols[e].id, s.trim());
+            match a.by_id.get(&id) {
+                Some(&v) if a.symbols[v].kind == SymKind::Value => Value::Enum(v),
+                _ => Value::Unknown(format!("`{s}` is not a value of `{}`", a.ty_name(ty))),
+            }
+        }
+        (Ty::Record(r), J::Object(o)) => {
+            let fields =
+                (0..a.symbols.len()).filter(|&f| a.symbols[f].kind == SymKind::Field && a.parent(f) == Some(r));
+            Value::Record(
+                fields
+                    .map(|f| {
+                        let name = a.symbols[f].id.rsplit('.').next().unwrap_or_default().to_string();
+                        let ft = a.member_types.get(&f).copied().unwrap_or(Ty::Unknown);
+                        let v = o.get(&name).map(|x| from_json(a, ft, x)).unwrap_or_else(|| unknown("not given"));
+                        (name, v)
+                    })
+                    .collect(),
+            )
+        }
+        (Ty::List(r), J::Array(xs)) => Value::List(xs.iter().map(|x| from_json(a, Ty::Record(r), x)).collect()),
+        (_, J::String(s)) => parse_value(a, ty, s),
+        (_, J::Bool(b)) => parse_input("bool", &b.to_string()),
+        (_, J::Number(n)) => parse_value(a, ty, &n.to_string()),
+        _ => Value::Unknown(format!("not {}", a.ty_name(ty))),
     }
 }
 
@@ -186,9 +299,14 @@ type Trace = (Option<Value>, Vec<(Value, bool)>);
 struct Eval<'a> {
     ws: &'a Sources,
     a: &'a Analysis,
-    inputs: &'a HashMap<String, String>,
+    /// Inputs as typed in, by name.
+    text: Option<&'a HashMap<String, String>>,
+    /// Inputs given as values, by symbol – when a norm is used by another.
+    given: HashMap<usize, Value>,
     memo: HashMap<usize, Value>,
     trace: HashMap<usize, Trace>,
+    /// The elements an aggregate goes through.
+    locals: Vec<(String, Value)>,
     depth: usize,
 }
 
@@ -196,7 +314,16 @@ fn unknown(why: &str) -> Value {
     Value::Unknown(why.into())
 }
 
-impl Eval<'_> {
+impl<'a> Eval<'a> {
+    fn new(
+        ws: &'a Sources,
+        a: &'a Analysis,
+        text: Option<&'a HashMap<String, String>>,
+        given: HashMap<usize, Value>,
+    ) -> Self {
+        Eval { ws, a, text, given, memo: HashMap::new(), trace: HashMap::new(), locals: Vec::new(), depth: 0 }
+    }
+
     fn member(&mut self, m: usize) -> Value {
         if let Some(v) = self.memo.get(&m) {
             return v.clone();
@@ -211,9 +338,14 @@ impl Eval<'_> {
         let mem = &n.members[member];
         self.depth += 1;
         let v = match &mem.kind {
-            MemberKind::Input | MemberKind::Judgement { .. } => {
-                parse_input(&mem.ty.text, self.inputs.get(&mem.name.text).map(String::as_str).unwrap_or(""))
-            }
+            MemberKind::Input | MemberKind::Judgement { .. } => match self.given.get(&m) {
+                Some(v) => v.clone(),
+                None => {
+                    let ty = self.a.member_types.get(&m).copied().unwrap_or(Ty::Unknown);
+                    let text = self.text.and_then(|t| t.get(&mem.name.text)).map(String::as_str).unwrap_or("");
+                    parse_value(self.a, ty, text)
+                }
+            },
             MemberKind::Constant(e) => self.expr(file, e),
             MemberKind::Rule { default, unless } => {
                 let d = default.as_ref().map(|e| self.expr(file, e));
@@ -241,17 +373,15 @@ impl Eval<'_> {
 
     fn expr(&mut self, file: usize, e: &Expr) -> Value {
         use Value::*;
-        let num = |v: &Value| if let Num(r) = v { Some(*r) } else { None };
         match &e.kind {
-            ExprKind::Number(n) | ExprKind::Money(n, _) => Rat::parse(n).map(Num).unwrap_or_else(|| unknown("number")),
+            ExprKind::Number(_) | ExprKind::Money(..) | ExprKind::Percent(_) => {
+                literal(e).map(Num).unwrap_or_else(|| unknown("number"))
+            }
             ExprKind::Bool(b) => Bool(*b),
             ExprKind::Date(d) => day_number(d).map(Date).unwrap_or_else(|| unknown("no such date")),
             ExprKind::Paren(x) => self.expr(file, x),
             ExprKind::Error => unknown("an error in the source"),
-            ExprKind::Ref(p) => match self.a.refs.get(&(file, p.span)) {
-                Some(Target::Symbol(s)) if self.a.parent(*s).is_some() => self.member(*s),
-                _ => unknown(&format!("`{}` is outside the norm", p.joined())),
-            },
+            ExprKind::Ref(p) => self.reference(file, p),
             ExprKind::Unary(UnOp::Not, x) => match self.expr(file, x) {
                 Bool(b) => Bool(!b),
                 other => other,
@@ -266,84 +396,258 @@ impl Eval<'_> {
                 other => other,
             },
             ExprKind::Call(p, args) => {
-                let name = p.joined();
                 let vals: Vec<Value> = args.iter().map(|x| self.expr(file, x)).collect();
                 if let Some(u) = vals.iter().find(|v| matches!(v, Unknown(_))) {
                     return u.clone();
                 }
-                let rats: Vec<Rat> = vals.iter().filter_map(num).collect();
-                if ROUNDING.contains(&name.as_str()) {
-                    let [x, step] = rats[..] else { return unknown("rounding needs a value and a step") };
-                    let Some(q) = x.div(step) else { return unknown("a step of zero") };
-                    let n = match name.as_str() {
-                        "round_down" => q.floor(),
-                        "round_up" => q.ceil(),
-                        // Halves away from zero.
-                        _ => {
-                            let half = Rat::new(1, 2).expect("½");
-                            if x.num >= 0 { q.add(half).map(Rat::floor) } else { q.sub(half).map(Rat::ceil) }
-                                .unwrap_or(0)
-                        }
-                    };
-                    return Rat::int(n).mul(step).map(Num).unwrap_or_else(|| unknown("too large"));
-                }
-                let pick = |better: std::cmp::Ordering| {
-                    rats.iter().copied().reduce(|a, b| if b.cmp(a) == better { b } else { a })
-                };
-                match name.as_str() {
-                    "min" => pick(std::cmp::Ordering::Less).map(Num).unwrap_or_else(|| unknown("min of nothing")),
-                    "max" => pick(std::cmp::Ordering::Greater).map(Num).unwrap_or_else(|| unknown("max of nothing")),
-                    _ => unknown(&format!("unknown function `{name}`")),
-                }
+                call(&p.joined(), &vals)
             }
+            ExprKind::Aggregate(agg) => self.aggregate(file, agg),
+            ExprKind::Apply(p, args) => self.apply(file, p, args),
+            ExprKind::Table(t) => self.table(file, t),
             ExprKind::Binary(op, x, y) => {
                 let (l, r) = (self.expr(file, x), self.expr(file, y));
-                // `and`/`or` decide without the unknown side where they can.
-                match (op, &l, &r) {
-                    (BinOp::And, Bool(false), _) | (BinOp::And, _, Bool(false)) => return Bool(false),
-                    (BinOp::Or, Bool(true), _) | (BinOp::Or, _, Bool(true)) => return Bool(true),
-                    _ => {}
-                }
-                if let Unknown(_) = l {
-                    return l;
-                }
-                if let Unknown(_) = r {
-                    return r;
-                }
-                let order = |l: &Value, r: &Value| match (l, r) {
-                    (Num(a), Num(b)) => Some(a.cmp(*b)),
-                    (Date(a), Date(b)) => Some(a.cmp(b)),
-                    (Bool(a), Bool(b)) => Some(a.cmp(b)),
-                    _ => None,
-                };
-                use std::cmp::Ordering::*;
-                let arith = |f: fn(Rat, Rat) -> Option<Rat>| match (num(&l), num(&r)) {
-                    (Some(a), Some(b)) => f(a, b).map(Num).unwrap_or_else(|| unknown("division by zero or too large")),
-                    _ => unknown("not numbers"),
-                };
-                match op {
-                    BinOp::And | BinOp::Or => match (&l, &r) {
-                        (Bool(a), Bool(b)) => Bool(if *op == BinOp::And { *a && *b } else { *a || *b }),
-                        _ => unknown("not truth values"),
-                    },
-                    BinOp::Add => arith(Rat::add),
-                    BinOp::Sub => arith(Rat::sub),
-                    BinOp::Mul => arith(Rat::mul),
-                    BinOp::Div => arith(Rat::div),
-                    cmp => match order(&l, &r) {
-                        Some(o) => Bool(match cmp {
-                            BinOp::Lt => o == Less,
-                            BinOp::Le => o != Greater,
-                            BinOp::Gt => o == Greater,
-                            BinOp::Ge => o != Less,
-                            BinOp::Eq => o == Equal,
-                            _ => o != Equal,
-                        }),
-                        None => unknown("cannot compare"),
-                    },
-                }
+                binary(*op, l, r)
             }
         }
+    }
+
+    fn reference(&mut self, file: usize, p: &Path) -> Value {
+        let base = match self.a.refs.get(&(file, p.span)) {
+            Some(Target::Local { name, .. }) => match self.locals.iter().rev().find(|(n, _)| n == name) {
+                Some((_, v)) => v.clone(),
+                None => unknown("no such element"),
+            },
+            Some(Target::Symbol(s)) if self.a.symbols[*s].kind == SymKind::Value => Value::Enum(*s),
+            Some(Target::Symbol(s)) if self.a.parent(*s).is_some() => self.member(*s),
+            _ => unknown(&format!("`{}` cannot be computed here", p.joined())),
+        };
+        let Some(fields) = self.a.fields.get(&(file, p.span)) else { return base };
+        fields.iter().fold(base, |v, &f| match v {
+            Value::Record(mut fs) => {
+                let name = self.a.symbols[f].id.rsplit('.').next().unwrap_or_default();
+                fs.remove(name).unwrap_or_else(|| unknown("no such field"))
+            }
+            other @ Value::Unknown(_) => other,
+            _ => unknown("not a record"),
+        })
+    }
+
+    fn aggregate(&mut self, file: usize, agg: &Aggregate) -> Value {
+        let list = match self.expr(file, &agg.list) {
+            Value::List(xs) => xs,
+            u @ Value::Unknown(_) => return u,
+            _ => return unknown("not a list"),
+        };
+        let func = agg.func.text.as_str();
+        let mut sum = Rat::int(0);
+        let mut count = 0i128;
+        let mut truth = func == "all";
+        let mut open: Option<Value> = None;
+        for x in list {
+            self.locals.push((agg.var.text.clone(), x));
+            let keep = match &agg.filter {
+                Some(f) => self.expr(file, f),
+                None => Value::Bool(true),
+            };
+            let body = match (&keep, &agg.body) {
+                (Value::Bool(true), Some(b)) => Some(self.expr(file, b)),
+                _ => None,
+            };
+            self.locals.pop();
+            match (keep, body) {
+                (Value::Bool(false), _) => {}
+                (u @ Value::Unknown(_), _) => open = open.or(Some(u)),
+                (_, Some(Value::Num(r))) => match sum.add(r) {
+                    Some(s) => sum = s,
+                    None => return unknown("too large"),
+                },
+                (_, Some(Value::Bool(b))) => {
+                    truth = if func == "all" { truth && b } else { truth || b };
+                }
+                (_, Some(u @ Value::Unknown(_))) => open = open.or(Some(u)),
+                (_, None) => count += 1,
+                _ => return unknown("not a number or truth value"),
+            }
+        }
+        // `all` and `any` decide without what is not known where they can.
+        match func {
+            "all" if !truth => Value::Bool(false),
+            "any" if truth => Value::Bool(true),
+            _ if open.is_some() => open.unwrap_or_else(|| unknown("not known")),
+            "sum" => Value::Num(sum),
+            "count" => Value::Num(Rat::int(count)),
+            _ => Value::Bool(truth),
+        }
+    }
+
+    fn apply(&mut self, file: usize, p: &Path, args: &[(Name, Expr)]) -> Value {
+        let Some(Target::Symbol(target)) = self.a.refs.get(&(file, p.span)).cloned() else {
+            return unknown("no such rule");
+        };
+        let mut given = HashMap::new();
+        for (name, x) in args {
+            let v = self.expr(file, x);
+            if let Some(Target::Symbol(i)) = self.a.refs.get(&(file, name.span)) {
+                given.insert(*i, v);
+            }
+        }
+        let mut sub = Eval::new(self.ws, self.a, None, given);
+        sub.depth = self.depth + 1;
+        sub.member(target)
+    }
+
+    fn table(&mut self, file: usize, t: &Table) -> Value {
+        let subject = self.expr(file, &t.subject);
+        if let Value::Unknown(_) = subject {
+            return subject;
+        }
+        for row in &t.rows {
+            let hit = match (&row.key, &subject) {
+                (RowKey::Value(key), Value::Enum(v)) => {
+                    matches!(self.a.refs.get(&(file, key.span)), Some(Target::Symbol(k)) if k == v)
+                }
+                (RowKey::UpTo(bound), _) => match binary(BinOp::Le, subject.clone(), self.expr(file, bound)) {
+                    Value::Bool(b) => b,
+                    other => return other,
+                },
+                _ => false,
+            };
+            if hit {
+                return self.expr(file, &row.value);
+            }
+        }
+        match &t.otherwise {
+            Some(o) => self.expr(file, o),
+            None => unknown("no row applies"),
+        }
+    }
+}
+
+/// A built-in function on known values.
+fn call(name: &str, vals: &[Value]) -> Value {
+    use Value::*;
+    let rats: Vec<Rat> = vals.iter().filter_map(|v| if let Num(r) = v { Some(*r) } else { None }).collect();
+    let ints: Option<Vec<i64>> = vals
+        .iter()
+        .map(|v| match v {
+            Num(r) => r.whole(),
+            Date(d) => Some(*d),
+            _ => None,
+        })
+        .collect();
+    let int = |n: i64| Num(Rat::int(n.into()));
+    if ROUNDING.contains(&name) {
+        let [x, step] = rats[..] else { return unknown("rounding needs a value and a step") };
+        let Some(q) = x.div(step) else { return unknown("a step of zero") };
+        let n = match name {
+            "round_down" => q.floor(),
+            "round_up" => q.ceil(),
+            // Halves away from zero.
+            _ => {
+                let half = Rat::new(1, 2).expect("½");
+                if x.num >= 0 { q.add(half).map(Rat::floor) } else { q.sub(half).map(Rat::ceil) }.unwrap_or(0)
+            }
+        };
+        return Rat::int(n).mul(step).map(Num).unwrap_or_else(|| unknown("too large"));
+    }
+    let pick = |better: std::cmp::Ordering| {
+        let order = |a: &Value, b: &Value| match (a, b) {
+            (Num(x), Num(y)) => x.cmp(y),
+            (Date(x), Date(y)) => x.cmp(y),
+            _ => std::cmp::Ordering::Equal,
+        };
+        vals.iter().cloned().reduce(|a, b| if order(&b, &a) == better { b } else { a })
+    };
+    match (name, ints.as_deref()) {
+        ("min", _) => pick(std::cmp::Ordering::Less).unwrap_or_else(|| unknown("min of nothing")),
+        ("max", _) => pick(std::cmp::Ordering::Greater).unwrap_or_else(|| unknown("max of nothing")),
+        ("abs", _) => match rats[..] {
+            [x] => Num(if x.num < 0 { Rat::int(0).sub(x).unwrap_or(x) } else { x }),
+            _ => unknown("abs of nothing"),
+        },
+        ("div" | "mod", Some([_, 0])) => unknown("division by zero"),
+        ("div", Some([a, b])) => int(a.div_euclid(*b)),
+        ("mod", Some([a, b])) => int(a.rem_euclid(*b)),
+        (part, Some([d])) if DATE_PARTS.contains(&part) => {
+            let (y, m, day) = date::civil(*d);
+            int(match part {
+                "year" => y,
+                "quarter" => (m - 1) / 3 + 1,
+                "month" => m,
+                "day" => day,
+                _ => date::weekday(*d),
+            })
+        }
+        ("date", Some([y, m, d])) => Date(date::date(*y, *m, *d)),
+        ("last_day", Some([y, m])) => Date(date::last_day(*y, *m)),
+        ("add_months", Some([d, n])) => Date(date::add_months(*d, *n)),
+        ("add_years", Some([d, n])) => Date(date::add_months(*d, 12 * n)),
+        (_, None) => unknown("not whole numbers"),
+        _ => unknown(&format!("unknown function `{name}`")),
+    }
+}
+
+/// An operator on two values.
+fn binary(op: BinOp, l: Value, r: Value) -> Value {
+    use Value::*;
+    // `and`/`or` decide without the unknown side where they can.
+    match (op, &l, &r) {
+        (BinOp::And, Bool(false), _) | (BinOp::And, _, Bool(false)) => return Bool(false),
+        (BinOp::Or, Bool(true), _) | (BinOp::Or, _, Bool(true)) => return Bool(true),
+        _ => {}
+    }
+    if let Unknown(_) = l {
+        return l;
+    }
+    if let Unknown(_) = r {
+        return r;
+    }
+    // Days after and before a date, and the days between two.
+    let days = |r: Rat| r.whole();
+    match (op, &l, &r) {
+        (BinOp::Add, Date(d), Num(n)) | (BinOp::Add, Num(n), Date(d)) => {
+            return days(*n).map(|n| Date(d + n)).unwrap_or_else(|| unknown("not whole days"));
+        }
+        (BinOp::Sub, Date(d), Num(n)) => {
+            return days(*n).map(|n| Date(d - n)).unwrap_or_else(|| unknown("not whole days"));
+        }
+        (BinOp::Sub, Date(a), Date(b)) => return Num(Rat::int((a - b).into())),
+        _ => {}
+    }
+    let num = |v: &Value| if let Num(r) = v { Some(*r) } else { None };
+    let order = |l: &Value, r: &Value| match (l, r) {
+        (Num(a), Num(b)) => Some(a.cmp(b)),
+        (Date(a), Date(b)) => Some(a.cmp(b)),
+        (Bool(a), Bool(b)) => Some(a.cmp(b)),
+        (Enum(a), Enum(b)) => Some(a.cmp(b)),
+        _ => None,
+    };
+    use std::cmp::Ordering::*;
+    let arith = |f: fn(Rat, Rat) -> Option<Rat>| match (num(&l), num(&r)) {
+        (Some(a), Some(b)) => f(a, b).map(Num).unwrap_or_else(|| unknown("division by zero or too large")),
+        _ => unknown("not numbers"),
+    };
+    match op {
+        BinOp::And | BinOp::Or => match (&l, &r) {
+            (Bool(a), Bool(b)) => Bool(if op == BinOp::And { *a && *b } else { *a || *b }),
+            _ => unknown("not truth values"),
+        },
+        BinOp::Add => arith(Rat::add),
+        BinOp::Sub => arith(Rat::sub),
+        BinOp::Mul => arith(Rat::mul),
+        BinOp::Div => arith(Rat::div),
+        cmp => match order(&l, &r) {
+            Some(o) => Bool(match cmp {
+                BinOp::Lt => o == Less,
+                BinOp::Le => o != Greater,
+                BinOp::Gt => o == Greater,
+                BinOp::Ge => o != Less,
+                BinOp::Eq => o == Equal,
+                _ => o != Equal,
+            }),
+            None => unknown("cannot compare"),
+        },
     }
 }
 
@@ -387,6 +691,54 @@ mod tests {
         assert!(matches!(s["ok"].value, Value::Unknown(_)));
         assert_eq!(Rat::new(1, 3).unwrap().to_string(), "≈ 0.333333");
         assert_eq!(Rat::parse("-0.25").unwrap().to_string(), "-0.25");
+    }
+
+    #[test]
+    fn evaluates_enumerations_records_lists_tables_dates_and_norms_using_norms() {
+        let src = r#"module m
+            enum residence { value domestic value eu value third }
+            unit km
+            record supply { field amount : money field kind : residence }
+            norm total {
+              input supplies : list supply
+              rule domestic_sum : money = sum(s.amount for s in supplies where s.kind == residence.domestic)
+              rule n : int = count(s in supplies)
+              rule none_third : bool = all(s.kind != residence.third for s in supplies)
+            }
+            norm n {
+              input where_ : residence
+              input way : km
+              input day : date
+              input supplies : list supply
+              rule rate : decimal { by where_ domestic: 19 % eu: 7 % otherwise: 0 % }
+              rule zone : int { by way up to 10 km: 0 up to 30 km: 1 otherwise: 2 }
+              rule deadline : date = last_day(year(day) + 2, 2)
+              rule quarter_after : date = date(year(day), 3 * quarter(day) + 1, 1)
+              rule month_end : date = add_months(day, 1)
+              rule days_left : int = deadline - day
+              rule weekday_of : int = weekday(day)
+              rule t : money = total.domestic_sum(supplies = supplies)
+              rule cents : int = mod(div(17, 5), 2) + abs(-3)
+            }"#;
+        let list = r#"[{"amount": "100", "kind": "domestic"}, {"amount": "50,5", "kind": "eu"}, {"amount": 20, "kind": "domestic"}]"#;
+        let s = run(src, "m.n", &[("where_", "eu"), ("way", "10"), ("day", "2025-01-31"), ("supplies", list)]);
+        assert_eq!(s["rate"].value.to_string(), "0.07");
+        assert_eq!(s["zone"].value.to_string(), "0");
+        assert_eq!(s["deadline"].value.to_string(), "2027-02-28");
+        assert_eq!(s["quarter_after"].value.to_string(), "2025-04-01");
+        assert_eq!(s["month_end"].value.to_string(), "2025-02-28");
+        assert_eq!(s["days_left"].value.to_string(), "758");
+        assert_eq!(s["weekday_of"].value.to_string(), "5");
+        assert_eq!(s["t"].value.to_string(), "120");
+        assert_eq!(s["cents"].value.to_string(), "4");
+        let s = run(src, "m.n", &[("where_", "third"), ("way", "30.5"), ("day", "2025-12-15")]);
+        assert_eq!(s["rate"].value.to_string(), "0");
+        assert_eq!(s["zone"].value.to_string(), "2");
+        assert_eq!(s["quarter_after"].value.to_string(), "2026-01-01");
+        assert!(matches!(s["t"].value, Value::Unknown(_)));
+        let s = run(src, "m.total", &[("supplies", list)]);
+        assert_eq!(s["n"].value.to_string(), "3");
+        assert_eq!(s["none_third"].value, Value::Bool(true));
     }
 
     #[test]

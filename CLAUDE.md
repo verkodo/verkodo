@@ -12,7 +12,8 @@ hover explanations derived from the formalisation. The language: `docs/language.
 prototype `formwelt` (same licence, same authors). Done: M0 parser and `check`, M1 knowledge graph and HTML with
 nested hover, M2 the Lean bridge, M2b names back from Lean's info trees (`crates/verkodo-lean/src/names.lean`), law
 in Lean (norms as Lean functions, properties as theorems), M3 a path as a Typst PDF (`verkodo pdf`), M4 the
-language server (`verkodo lsp`, docs/editors.md), the language questions of the draft, a web editor (prototype).
+language server (`verkodo lsp`, docs/editors.md), the language questions of the draft, a web editor (prototype),
+the data types of the legal profile (enumerations, units, records and lists, tables, dates, norms that use norms).
 Next: OPEN.
 
 ## Layout

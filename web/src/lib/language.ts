@@ -10,13 +10,14 @@ const KEYWORDS = new Set(
   (
     "module concept variant bridge theorem example remark path step label source params type lean statement proof " +
     "using about text norm valid from to replaces input judgement criteria constant rule obligation permission " +
-    "prohibition default when unless then if else and or not"
+    "prohibition default when unless then if else and or not enum value unit record field by up otherwise for in " +
+    "where"
   ).split(" "),
 );
-const TYPES = new Set(["bool", "money", "int", "decimal", "date"]);
+const TYPES = new Set(["bool", "money", "int", "decimal", "date", "list"]);
 const DECLARING = new Set([
   "concept", "variant", "theorem", "example", "remark", "path", "norm", "input", "judgement", "constant", "rule",
-  "obligation", "permission", "prohibition",
+  "obligation", "permission", "prohibition", "enum", "value", "unit", "record", "field",
 ]);
 
 interface State {

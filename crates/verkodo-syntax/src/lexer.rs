@@ -39,6 +39,7 @@ pub enum Tok {
     Minus,
     Star,
     Slash,
+    Percent,
     Eof,
 }
 
@@ -78,6 +79,7 @@ fn punct(t: &Tok) -> &'static str {
         Tok::Minus => "-",
         Tok::Star => "*",
         Tok::Slash => "/",
+        Tok::Percent => "%",
         _ => "?",
     }
 }
@@ -242,6 +244,7 @@ const PUNCT: &[(&str, Tok)] = &[
     ("-", Tok::Minus),
     ("*", Tok::Star),
     ("/", Tok::Slash),
+    ("%", Tok::Percent),
 ];
 
 pub fn lex(text: &str, file: usize, diags: &mut Vec<Diagnostic>) -> Vec<Token> {

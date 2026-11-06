@@ -41,15 +41,17 @@ norm income_tax
     label en z (zone 3)
     source § 32a Abs. 1 EStG
 
-  rule tax_exact : money =
-      if x <= basic_allowance then 0 EUR
-      else if x <= 17_799 EUR then (914.51 EUR * y + 1_400 EUR) * y
-      else if x <= 69_878 EUR then (173.10 EUR * z + 2_397 EUR) * z + 1_034.87 EUR
-      else if x <= 277_825 EUR then 0.42 * x - 11_135.63 EUR
-      else 0.45 * x - 19_470.38 EUR
+  // The five zones as a table: each row up to its bound, the last row above all of them.
+  rule tax_exact : money
     label de Steuerbetrag vor dem Abrunden
     label en tax before rounding down
     source § 32a Abs. 1 Satz 2 EStG
+    by x
+    up to basic_allowance: 0 EUR
+    up to 17_799 EUR: (914.51 EUR * y + 1_400 EUR) * y
+    up to 69_878 EUR: (173.10 EUR * z + 2_397 EUR) * z + 1_034.87 EUR
+    up to 277_825 EUR: 0.42 * x - 11_135.63 EUR
+    otherwise: 0.45 * x - 19_470.38 EUR
 
   rule tax : money = round_down(tax_exact, 1 EUR)
     label de tarifliche Einkommensteuer

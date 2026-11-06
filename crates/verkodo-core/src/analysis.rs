@@ -9,7 +9,7 @@ use verkodo_syntax::{Diagnostic, Span};
 
 use crate::lean;
 use crate::sources::Sources;
-use crate::types::Ty;
+use crate::types::{CURRENCIES, Ty};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SymKind {
@@ -24,6 +24,13 @@ pub enum SymKind {
     Constant,
     Rule,
     Path,
+    Enum,
+    /// A value of an enumeration.
+    Value,
+    Unit,
+    Record,
+    /// A field of a record.
+    Field,
 }
 
 impl SymKind {
@@ -40,6 +47,11 @@ impl SymKind {
             SymKind::Constant => "constant",
             SymKind::Rule => "rule",
             SymKind::Path => "path",
+            SymKind::Enum => "enum",
+            SymKind::Value => "value",
+            SymKind::Unit => "unit",
+            SymKind::Record => "record",
+            SymKind::Field => "field",
         }
     }
 
@@ -154,7 +166,16 @@ pub struct Analysis {
     pub refs: HashMap<(usize, Span), Target>,
     /// What each symbol refers to.
     pub deps: Vec<BTreeSet<usize>>,
+    /// The types of inputs, judgements, constants, rules and fields of records.
     pub member_types: HashMap<usize, Ty>,
+    /// The type of every expression of the legal profile, keyed by file and span – what Lean needs to convert
+    /// whole numbers where fractions are computed.
+    pub expr_types: HashMap<(usize, Span), Ty>,
+    /// Fields read after a value (`owner.age`, `s.amount`), keyed by file and the span of the path: the field
+    /// symbols in order. `refs` holds what the path starts from.
+    pub fields: HashMap<(usize, Span), Vec<usize>>,
+    /// The variables of the aggregates around the expression being checked.
+    locals: Vec<(String, Ty)>,
     /// Versions of a provision: a norm → the earlier norm it replaces.
     pub replaces: HashMap<usize, usize>,
     /// The other way round: a norm → the later norm that replaces it.
@@ -166,7 +187,32 @@ pub struct Analysis {
     pub diags: Vec<Diagnostic>,
 }
 
-const BUILTINS: &[&str] = &["min", "max", "round_down", "round_up", "round"];
+const BUILTINS: &[&str] = &[
+    "min",
+    "max",
+    "abs",
+    "div",
+    "mod",
+    "round_down",
+    "round_up",
+    "round",
+    "year",
+    "quarter",
+    "month",
+    "day",
+    "weekday",
+    "date",
+    "last_day",
+    "add_months",
+    "add_years",
+];
+
+/// Functions that take a date and give a whole number: its year, quarter (1–4), month (1–12), day of the month and
+/// day of the week (1 Monday … 7 Sunday).
+pub const DATE_PARTS: &[&str] = &["year", "quarter", "month", "day", "weekday"];
+
+/// The aggregates over a list.
+pub const AGGREGATES: &[&str] = &["sum", "count", "all", "any"];
 
 /// Rounding to a multiple of a step: down, up, or half away from zero ("kaufmännisch").
 pub const ROUNDING: &[&str] = &["round_down", "round_up", "round"];
@@ -174,6 +220,7 @@ pub const ROUNDING: &[&str] = &["round_down", "round_up", "round"];
 pub fn analyze(ws: &Sources) -> Analysis {
     let mut a = Analysis::default();
     a.collect(ws);
+    a.assign_types(ws);
     a.resolve(ws);
     a.check_versions(ws);
     a.check_translations(ws);
@@ -196,7 +243,9 @@ impl Analysis {
             },
             Loc::Member { file, item, member } => match &ws.asts[file].items[item] {
                 Item::Norm(n) => &n.members[member].meta,
-                _ => unreachable!("member outside a norm"),
+                Item::Enum(e) => &e.values[member].meta,
+                Item::Record(r) => &r.fields[member].meta,
+                _ => unreachable!("member outside a norm, enumeration or record"),
             },
         }
     }
@@ -204,7 +253,13 @@ impl Analysis {
     /// The concept a variant belongs to, or the norm a member belongs to.
     pub fn parent(&self, sym: usize) -> Option<usize> {
         match self.symbols[sym].kind {
-            SymKind::Variant | SymKind::Input | SymKind::Judgement | SymKind::Constant | SymKind::Rule => {
+            SymKind::Variant
+            | SymKind::Input
+            | SymKind::Judgement
+            | SymKind::Constant
+            | SymKind::Rule
+            | SymKind::Value
+            | SymKind::Field => {
                 let (parent, _) = self.symbols[sym].id.rsplit_once('.')?;
                 self.by_id.get(parent).copied()
             }
@@ -249,6 +304,9 @@ impl Analysis {
                     Item::Remark(_) => SymKind::Remark,
                     Item::Norm(_) => SymKind::Norm,
                     Item::Path(_) => SymKind::Path,
+                    Item::Enum(_) => SymKind::Enum,
+                    Item::Unit(_) => SymKind::Unit,
+                    Item::Record(_) => SymKind::Record,
                 };
                 if self.add(id.clone(), kind, Loc::Item { file, item }, it.name().span).is_none() {
                     continue;
@@ -269,23 +327,103 @@ impl Analysis {
                                 MemberKind::Rule { .. } => SymKind::Rule,
                             };
                             let loc = Loc::Member { file, item, member };
-                            let Some(s) = self.add(format!("{id}.{}", mem.name.text), kind, loc, mem.name.span) else {
-                                continue;
-                            };
-                            let ty = Ty::parse(&mem.ty.text).unwrap_or_else(|| {
-                                let msg = format!(
-                                    "unknown type `{}` (expected bool, money, int, decimal or date)",
-                                    mem.ty.text
-                                );
-                                self.diags.push(Diagnostic::error(file, mem.ty.span, msg));
-                                Ty::Unknown
-                            });
-                            self.member_types.insert(s, ty);
+                            self.add(format!("{id}.{}", mem.name.text), kind, loc, mem.name.span);
+                        }
+                    }
+                    Item::Enum(e) => {
+                        for (member, v) in e.values.iter().enumerate() {
+                            let loc = Loc::Member { file, item, member };
+                            self.add(format!("{id}.{}", v.name.text), SymKind::Value, loc, v.name.span);
+                        }
+                        if e.values.is_empty() {
+                            let msg = format!("enumeration `{}` has no values", e.name.text);
+                            self.diags.push(Diagnostic::error(file, e.name.span, msg));
+                        }
+                    }
+                    Item::Record(r) => {
+                        for (member, f) in r.fields.iter().enumerate() {
+                            let loc = Loc::Member { file, item, member };
+                            self.add(format!("{id}.{}", f.name.text), SymKind::Field, loc, f.name.span);
                         }
                     }
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// The types of members and fields, once every type is declared.
+    fn assign_types(&mut self, ws: &Sources) {
+        for (file, ast) in ws.asts.iter().enumerate() {
+            let Some(module) = &ast.module else { continue };
+            let m = module.joined();
+            for it in &ast.items {
+                let id = format!("{m}.{}", it.name().text);
+                let typed: Vec<(&Name, &TypeRef)> = match it {
+                    Item::Norm(n) => n.members.iter().map(|x| (&x.name, &x.ty)).collect(),
+                    Item::Record(r) => r.fields.iter().map(|x| (&x.name, &x.ty)).collect(),
+                    _ => continue,
+                };
+                for (name, ty) in typed {
+                    let Some(&s) = self.by_id.get(&format!("{id}.{}", name.text)) else { continue };
+                    if self.symbols[s].span != name.span {
+                        continue; // a duplicate, already reported
+                    }
+                    let t = self.resolve_type(file, &m, ty, s);
+                    if let (Item::Record(_), Ty::Record(r) | Ty::List(r)) = (it, t)
+                        && self.by_id.get(&id) == Some(&r)
+                    {
+                        let msg = format!("a field of `{}` cannot hold `{}` itself", it.name().text, it.name().text);
+                        self.diags.push(Diagnostic::error(file, ty.span, msg));
+                    }
+                    self.member_types.insert(s, t);
+                }
+            }
+        }
+    }
+
+    /// A type as written: built in, or an enumeration, unit or record of some module; `list` only of records.
+    fn resolve_type(&mut self, file: usize, module: &str, ty: &TypeRef, owner: usize) -> Ty {
+        let name = ty.name.joined();
+        if !ty.list
+            && let Some(t) = Ty::parse(&name)
+        {
+            return t;
+        }
+        let Some(s) = self.lookup(&name, &[module]) else {
+            let msg =
+                format!("unknown type `{name}` (expected bool, money, int, decimal, date, or an enum, unit or record)");
+            self.diags.push(Diagnostic::error(file, ty.name.span, msg));
+            return Ty::Unknown;
+        };
+        self.refs.insert((file, ty.name.span), Target::Symbol(s));
+        self.deps[owner].insert(s);
+        let t = match self.symbols[s].kind {
+            SymKind::Enum => Ty::Enum(s),
+            SymKind::Unit => Ty::Quantity(s),
+            SymKind::Record if ty.list => return Ty::List(s),
+            SymKind::Record => Ty::Record(s),
+            other => {
+                let msg = format!("`{name}` is a {}, not a type", other.keyword());
+                self.diags.push(Diagnostic::error(file, ty.name.span, msg));
+                return Ty::Unknown;
+            }
+        };
+        if ty.list {
+            let msg = format!("a list holds records, and `{name}` is an {}", t.name());
+            self.diags.push(Diagnostic::error(file, ty.span, msg));
+            return Ty::Unknown;
+        }
+        t
+    }
+
+    /// The name of a type as written in the source: `money`, `residence`, `list supply`.
+    pub fn ty_name(&self, t: Ty) -> String {
+        let short = |s: usize| self.symbols[s].id.rsplit('.').next().unwrap_or_default().to_string();
+        match t {
+            Ty::Enum(s) | Ty::Quantity(s) | Ty::Record(s) => short(s),
+            Ty::List(s) => format!("list {}", short(s)),
+            other => other.name().to_string(),
         }
     }
 
@@ -343,6 +481,7 @@ impl Analysis {
                             self.resolve_path(file, step, &[&m], me);
                         }
                     }
+                    Item::Enum(_) | Item::Unit(_) | Item::Record(_) => {}
                 }
             }
         }
@@ -825,7 +964,7 @@ impl Analysis {
 
     fn expect(&mut self, file: usize, span: Span, got: Ty, want: Ty) {
         if got != Ty::Unknown && want != Ty::Unknown && Ty::unify(got, want) != Some(want) {
-            let msg = format!("expected {}, found {}", want.name(), got.name());
+            let msg = format!("expected {}, found {}", self.ty_name(want), self.ty_name(got));
             self.diags.push(Diagnostic::error(file, span, msg));
         }
     }
@@ -835,10 +974,54 @@ impl Analysis {
         Ty::Unknown
     }
 
+    /// The type of an expression – recorded, for Lean.
     fn expr(&mut self, file: usize, e: &Expr, scopes: &[&str], owner: usize) -> Ty {
+        let t = self.expr_kind(file, e, scopes, owner);
+        self.expr_types.insert((file, e.span), t);
+        t
+    }
+
+    fn expr_kind(&mut self, file: usize, e: &Expr, scopes: &[&str], owner: usize) -> Ty {
         match &e.kind {
             ExprKind::Number(_) => Ty::Num,
-            ExprKind::Money(..) => Ty::Money,
+            ExprKind::Percent(_) => Ty::Decimal,
+            ExprKind::Money(_, unit) => {
+                if CURRENCIES.contains(&unit.text.as_str()) {
+                    return Ty::Money;
+                }
+                // A unit by its name here, or – units being few – by its short name in any module, if only one has it.
+                let units: Vec<usize> = self
+                    .lookup(&unit.text, scopes)
+                    .filter(|&s| self.symbols[s].kind == SymKind::Unit)
+                    .map(|s| vec![s])
+                    .unwrap_or_else(|| {
+                        let suffix = format!(".{}", unit.text);
+                        (0..self.symbols.len())
+                            .filter(|&s| self.symbols[s].kind == SymKind::Unit && self.symbols[s].id.ends_with(&suffix))
+                            .collect()
+                    });
+                if units.len() > 1 {
+                    let ids: Vec<&str> = units.iter().map(|&s| self.symbols[s].id.as_str()).collect();
+                    let msg = format!("`{}` is a unit of several modules: {}", unit.text, ids.join(", "));
+                    return self.mismatch(file, unit.span, msg);
+                }
+                match units.first().copied() {
+                    Some(s) => {
+                        self.refs.insert((file, unit.span), Target::Symbol(s));
+                        self.deps[owner].insert(s);
+                        Ty::Quantity(s)
+                    }
+                    _ => {
+                        let msg = format!(
+                            "unknown currency or unit `{}` (currencies: {}; units are declared: `unit {}`)",
+                            unit.text,
+                            CURRENCIES.join(", "),
+                            unit.text
+                        );
+                        self.mismatch(file, unit.span, msg)
+                    }
+                }
+            }
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Date(d) => {
                 self.check_date(file, e.span, d);
@@ -846,43 +1029,24 @@ impl Analysis {
             }
             ExprKind::Error => Ty::Unknown,
             ExprKind::Paren(inner) => self.expr(file, inner, scopes, owner),
-            ExprKind::Ref(p) => {
-                let Some(s) = self.resolve_path(file, p, scopes, owner) else {
-                    return Ty::Unknown;
-                };
-                match self.member_types.get(&s) {
-                    Some(&t) => t,
-                    None => {
-                        let msg = format!("`{}` is a {}, not a value", p.joined(), self.symbols[s].kind.keyword());
-                        self.mismatch(file, p.span, msg)
-                    }
-                }
-            }
+            ExprKind::Ref(p) => self.reference(file, p, scopes, owner),
             ExprKind::Call(p, args) => {
                 let tys: Vec<Ty> = args.iter().map(|x| self.expr(file, x, scopes, owner)).collect();
                 let name = p.joined();
                 if !BUILTINS.contains(&name.as_str()) {
-                    let known = BUILTINS.join(", ");
-                    return self.mismatch(file, p.span, format!("unknown function `{name}` (known: {known})"));
+                    let msg = if AGGREGATES.contains(&name.as_str()) {
+                        format!("`{name}` goes over a list: `{name}(x.amount for x in list)`")
+                    } else {
+                        format!("unknown function `{name}` (known: {})", BUILTINS.join(", "))
+                    };
+                    return self.mismatch(file, p.span, msg);
                 }
                 self.refs.insert((file, p.span), Target::Builtin(name.clone()));
-                if ROUNDING.contains(&name.as_str()) {
-                    return self.rounding(file, e, &name, args, &tys);
-                }
-                if tys.is_empty() {
-                    return self.mismatch(file, e.span, format!("`{name}` needs at least one argument"));
-                }
-                let mut t = tys[0];
-                for &u in &tys[1..] {
-                    match Ty::unify(t, u) {
-                        Some(x) if x.is_numeric() => t = x,
-                        _ => {
-                            return self.mismatch(file, e.span, format!("`{name}` needs numbers of one type"));
-                        }
-                    }
-                }
-                t
+                self.call(file, e, &name, args, &tys)
             }
+            ExprKind::Aggregate(agg) => self.aggregate(file, agg, scopes, owner),
+            ExprKind::Apply(p, args) => self.apply(file, e, p, args, scopes, owner),
+            ExprKind::Table(t) => self.table(file, t, scopes, owner),
             ExprKind::Unary(UnOp::Not, x) => {
                 let t = self.expr(file, x, scopes, owner);
                 self.expect(file, x.span, t, Ty::Bool);
@@ -891,7 +1055,7 @@ impl Analysis {
             ExprKind::Unary(UnOp::Neg, x) => {
                 let t = self.expr(file, x, scopes, owner);
                 if !t.is_numeric() {
-                    return self.mismatch(file, x.span, format!("cannot negate {}", t.name()));
+                    return self.mismatch(file, x.span, format!("cannot negate {}", self.ty_name(t)));
                 }
                 t
             }
@@ -901,7 +1065,8 @@ impl Analysis {
                 let tx = self.expr(file, x, scopes, owner);
                 let ty = self.expr(file, y, scopes, owner);
                 Ty::unify(tx, ty).unwrap_or_else(|| {
-                    self.mismatch(file, e.span, format!("the branches differ: {} and {}", tx.name(), ty.name()))
+                    let msg = format!("the branches differ: {} and {}", self.ty_name(tx), self.ty_name(ty));
+                    self.mismatch(file, e.span, msg)
                 })
             }
             ExprKind::Binary(op, l, r) => {
@@ -912,9 +1077,356 @@ impl Analysis {
         }
     }
 
+    /// A path to a value: a variable of an aggregate, a member of this norm, a constant of another norm or a value of
+    /// an enumeration – then fields of records (`owner.age`, `s.amount`).
+    fn reference(&mut self, file: usize, p: &Path, scopes: &[&str], owner: usize) -> Ty {
+        let segs = &p.segments;
+        let first = &segs[0].text;
+        // Where the value comes from, and how many segments that takes.
+        let (mut ty, used) = if let Some((name, t)) = self.locals.iter().rev().find(|(n, _)| n == first) {
+            let target = Target::Local { name: name.clone(), ty: self.ty_name(*t) };
+            self.refs.insert((file, p.span), target);
+            (*t, 1)
+        } else {
+            let found = (1..=segs.len()).rev().find_map(|k| {
+                let prefix = segs[..k].iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(".");
+                self.lookup(&prefix, scopes).map(|s| (s, k))
+            });
+            let Some((s, k)) = found else {
+                return self.mismatch(file, p.span, format!("cannot find `{}`", p.joined()));
+            };
+            if self.symbols[s].kind == SymKind::Enum && k < segs.len() {
+                let msg = format!("enumeration `{}` has no value `{}`", segs[0].text, segs[k].text);
+                return self.mismatch(file, segs[k].span, msg);
+            }
+            self.refs.insert((file, p.span), Target::Symbol(s));
+            self.deps[owner].insert(s);
+            let sym = &self.symbols[s];
+            let t = match sym.kind {
+                SymKind::Value => match self.parent(s) {
+                    Some(e) => Ty::Enum(e),
+                    None => Ty::Unknown,
+                },
+                SymKind::Input | SymKind::Judgement | SymKind::Rule
+                    if self.parent(s).is_some() && self.parent(s) != self.parent(owner) =>
+                {
+                    let norm = self.parent(s).map(|n| self.symbols[n].id.clone()).unwrap_or_default();
+                    let msg = format!(
+                        "`{}` belongs to norm `{norm}` and depends on its inputs: give them, as in `{}(input = …)`",
+                        segs[..k].iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("."),
+                        segs[..k].iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(".")
+                    );
+                    return self.mismatch(file, p.span, msg);
+                }
+                _ => match self.member_types.get(&s) {
+                    Some(&t) if sym.kind != SymKind::Field => t,
+                    _ => {
+                        let kw = sym.kind.keyword();
+                        let article = if kw.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+                        let msg = format!("`{}` is {article} {kw}, not a value", p.joined());
+                        return self.mismatch(file, p.span, msg);
+                    }
+                },
+            };
+            (t, k)
+        };
+        // Fields.
+        let mut fields = Vec::new();
+        for seg in &segs[used..] {
+            let Ty::Record(r) = ty else {
+                if ty == Ty::Unknown {
+                    return Ty::Unknown;
+                }
+                let msg = format!("{} has no field `{}`: only records have fields", self.ty_name(ty), seg.text);
+                return self.mismatch(file, seg.span, msg);
+            };
+            let id = format!("{}.{}", self.symbols[r].id, seg.text);
+            let Some(&f) = self.by_id.get(&id) else {
+                let msg = format!("record `{}` has no field `{}`", self.ty_name(ty), seg.text);
+                return self.mismatch(file, seg.span, msg);
+            };
+            self.refs.insert((file, seg.span), Target::Symbol(f));
+            self.deps[owner].insert(f);
+            fields.push(f);
+            ty = self.member_types.get(&f).copied().unwrap_or(Ty::Unknown);
+        }
+        if !fields.is_empty() {
+            self.fields.insert((file, p.span), fields);
+        }
+        ty
+    }
+
+    /// A built-in function.
+    fn call(&mut self, file: usize, e: &Expr, name: &str, args: &[Expr], tys: &[Ty]) -> Ty {
+        if ROUNDING.contains(&name) {
+            return self.rounding(file, e, name, args, tys);
+        }
+        let arity = |a: &mut Self, n: usize, how: &str| {
+            if tys.len() != n {
+                a.mismatch(file, e.span, format!("`{name}` takes {how}"));
+                return false;
+            }
+            true
+        };
+        let want = |a: &mut Self, i: usize, t: Ty| a.expect(file, args[i].span, tys[i], t);
+        match name {
+            "min" | "max" => {
+                if tys.is_empty() {
+                    return self.mismatch(file, e.span, format!("`{name}` needs at least one argument"));
+                }
+                let mut t = tys[0];
+                for &u in &tys[1..] {
+                    match Ty::unify(t, u) {
+                        Some(x) if x.is_numeric() || x == Ty::Date => t = x,
+                        _ => {
+                            let msg = format!("`{name}` needs numbers, amounts or dates of one type");
+                            return self.mismatch(file, e.span, msg);
+                        }
+                    }
+                }
+                t
+            }
+            "abs" => {
+                if !arity(self, 1, "one number or amount") {
+                    return Ty::Unknown;
+                }
+                if !tys[0].is_numeric() {
+                    return self.mismatch(file, args[0].span, format!("`abs` of {}", self.ty_name(tys[0])));
+                }
+                tys[0]
+            }
+            "div" | "mod" => {
+                if !arity(self, 2, "two whole numbers") {
+                    return Ty::Unknown;
+                }
+                want(self, 0, Ty::Int);
+                want(self, 1, Ty::Int);
+                Ty::Int
+            }
+            _ if DATE_PARTS.contains(&name) => {
+                if arity(self, 1, "a date") {
+                    want(self, 0, Ty::Date);
+                }
+                Ty::Int
+            }
+            "date" => {
+                if arity(self, 3, "a year, a month and a day") {
+                    (0..3).for_each(|i| want(self, i, Ty::Int));
+                }
+                Ty::Date
+            }
+            "last_day" => {
+                if arity(self, 2, "a year and a month") {
+                    (0..2).for_each(|i| want(self, i, Ty::Int));
+                }
+                Ty::Date
+            }
+            _ => {
+                // add_months, add_years
+                if arity(self, 2, "a date and a whole number") {
+                    want(self, 0, Ty::Date);
+                    want(self, 1, Ty::Int);
+                }
+                Ty::Date
+            }
+        }
+    }
+
+    /// `sum(<body> for <var> in <list> where <filter>)` and its kin.
+    fn aggregate(&mut self, file: usize, agg: &Aggregate, scopes: &[&str], owner: usize) -> Ty {
+        let func = agg.func.text.as_str();
+        if !AGGREGATES.contains(&func) {
+            let msg = format!("unknown aggregate `{func}` (known: {})", AGGREGATES.join(", "));
+            return self.mismatch(file, agg.func.span, msg);
+        }
+        self.refs.insert((file, agg.func.span), Target::Builtin(func.to_string()));
+        let lt = self.expr(file, &agg.list, scopes, owner);
+        let elem = match lt {
+            Ty::List(r) => Ty::Record(r),
+            Ty::Unknown => Ty::Unknown,
+            other => {
+                let msg = format!("`{func}` goes over a list, not {}", self.ty_name(other));
+                return self.mismatch(file, agg.list.span, msg);
+            }
+        };
+        self.locals.push((agg.var.text.clone(), elem));
+        if let Some(f) = &agg.filter {
+            let t = self.expr(file, f, scopes, owner);
+            self.expect(file, f.span, t, Ty::Bool);
+        }
+        let body = agg.body.as_ref().map(|b| (b.span, self.expr(file, b, scopes, owner)));
+        self.locals.pop();
+        match (func, body) {
+            ("count", None) => Ty::Int,
+            ("count", Some((span, _))) => {
+                self.mismatch(file, span, "`count` counts elements: `count(s in supplies where …)`".into())
+            }
+            (_, None) => {
+                let msg = format!("`{func}` needs what to take of each element: `{func}(<…> for s in list)`");
+                self.mismatch(file, agg.func.span, msg)
+            }
+            ("sum", Some((span, t))) => {
+                if !t.is_numeric() {
+                    return self.mismatch(file, span, format!("cannot sum {}", self.ty_name(t)));
+                }
+                if t == Ty::Num { Ty::Int } else { t }
+            }
+            (_, Some((span, t))) => {
+                self.expect(file, span, t, Ty::Bool);
+                Ty::Bool
+            }
+        }
+    }
+
+    /// A rule or constant of a norm for inputs given by name – every input of that norm, once.
+    fn apply(&mut self, file: usize, e: &Expr, p: &Path, args: &[(Name, Expr)], scopes: &[&str], owner: usize) -> Ty {
+        let arg_tys: Vec<Ty> = args.iter().map(|(_, x)| self.expr(file, x, scopes, owner)).collect();
+        let Some(s) = self.lookup(&p.joined(), scopes) else {
+            return self.mismatch(file, p.span, format!("cannot find `{}`", p.joined()));
+        };
+        let kind = self.symbols[s].kind;
+        let Some(norm) = self.parent(s).filter(|_| matches!(kind, SymKind::Rule | SymKind::Constant)) else {
+            let msg =
+                format!("`{}` is a {}: only a rule or constant of a norm takes inputs", p.joined(), kind.keyword());
+            return self.mismatch(file, p.span, msg);
+        };
+        if s == owner {
+            return self.mismatch(file, p.span, format!("`{}` cannot use itself", p.joined()));
+        }
+        self.refs.insert((file, p.span), Target::Symbol(s));
+        self.deps[owner].insert(s);
+        let nid = self.symbols[norm].id.clone();
+        let inputs: Vec<usize> = (0..self.symbols.len())
+            .filter(|&m| {
+                self.parent(m) == Some(norm) && matches!(self.symbols[m].kind, SymKind::Input | SymKind::Judgement)
+            })
+            .collect();
+        let mut given = HashSet::new();
+        for ((name, x), t) in args.iter().zip(arg_tys) {
+            let Some(&i) = self.by_id.get(&format!("{nid}.{}", name.text)).filter(|i| inputs.contains(i)) else {
+                let msg = format!("norm `{nid}` has no input `{}`", name.text);
+                self.mismatch(file, name.span, msg);
+                continue;
+            };
+            if !given.insert(i) {
+                self.mismatch(file, name.span, format!("input `{}` is given twice", name.text));
+                continue;
+            }
+            self.refs.insert((file, name.span), Target::Symbol(i));
+            let want = self.member_types.get(&i).copied().unwrap_or(Ty::Unknown);
+            self.expect(file, x.span, t, want);
+        }
+        let missing: Vec<String> = inputs
+            .iter()
+            .filter(|i| !given.contains(i))
+            .map(|&i| self.symbols[i].id.rsplit('.').next().unwrap_or_default().to_string())
+            .collect();
+        if !missing.is_empty() {
+            let msg = format!("`{}` needs every input of `{nid}`; missing: {}", p.joined(), missing.join(", "));
+            self.mismatch(file, e.span, msg);
+        }
+        self.member_types.get(&s).copied().unwrap_or(Ty::Unknown)
+    }
+
+    /// A table: rows by the values of an enumeration, or by ranges `up to` ascending bounds with `otherwise` above.
+    fn table(&mut self, file: usize, t: &Table, scopes: &[&str], owner: usize) -> Ty {
+        let st = self.expr(file, &t.subject, scopes, owner);
+        let mut result = Ty::Unknown;
+        let mut unify = |a: &mut Self, span: Span, v: Ty| match Ty::unify(result, v) {
+            Some(x) => result = x,
+            None => {
+                let msg = format!("the rows give different types: {} and {}", a.ty_name(result), a.ty_name(v));
+                a.mismatch(file, span, msg);
+            }
+        };
+        match st {
+            Ty::Enum(en) => {
+                let mut seen = HashSet::new();
+                for row in &t.rows {
+                    let RowKey::Value(key) = &row.key else {
+                        self.mismatch(file, row.span, "rows by an enumeration name its values, not `up to`".into());
+                        continue;
+                    };
+                    let enum_id = self.symbols[en].id.clone();
+                    let found = self
+                        .by_id
+                        .get(&format!("{enum_id}.{}", key.joined()))
+                        .copied()
+                        .or_else(|| self.lookup(&key.joined(), scopes).filter(|&v| self.parent(v) == Some(en)));
+                    match found {
+                        Some(v) if self.symbols[v].kind == SymKind::Value => {
+                            self.refs.insert((file, key.span), Target::Symbol(v));
+                            if !seen.insert(v) {
+                                self.mismatch(file, key.span, format!("`{}` has a row already", key.joined()));
+                            }
+                        }
+                        _ => {
+                            let msg = format!("`{}` is not a value of `{}`", key.joined(), self.ty_name(st));
+                            self.mismatch(file, key.span, msg);
+                        }
+                    }
+                }
+                let all: Vec<usize> = (0..self.symbols.len())
+                    .filter(|&v| self.symbols[v].kind == SymKind::Value && self.parent(v) == Some(en))
+                    .collect();
+                let missing: Vec<String> = all
+                    .iter()
+                    .filter(|v| !seen.contains(v))
+                    .map(|&v| self.symbols[v].id.rsplit('.').next().unwrap_or_default().to_string())
+                    .collect();
+                if t.otherwise.is_none() && !missing.is_empty() {
+                    let msg = format!("the table has no row for {} – add them or `otherwise`", missing.join(", "));
+                    self.mismatch(file, t.subject.span, msg);
+                }
+                if t.otherwise.is_some() && missing.is_empty() {
+                    let msg = "every value has a row: `otherwise` is never used".to_string();
+                    self.diags.push(Diagnostic::warning(file, t.subject.span, msg));
+                }
+            }
+            Ty::Unknown => {}
+            s if s.is_numeric() || s == Ty::Date => {
+                let mut last: Option<(crate::eval::Rat, Span)> = None;
+                for row in &t.rows {
+                    let RowKey::UpTo(bound) = &row.key else {
+                        let msg = format!("rows by {} are ranges: `up to <bound>: <value>`", self.ty_name(s));
+                        self.mismatch(file, row.span, msg);
+                        continue;
+                    };
+                    let bt = self.expr(file, bound, scopes, owner);
+                    self.expect(file, bound.span, bt, s);
+                    if let Some(v) = crate::eval::literal(bound) {
+                        if let Some((prev, _)) = last
+                            && v <= prev
+                        {
+                            self.mismatch(file, bound.span, "the bounds of a table go up: each above the last".into());
+                        }
+                        last = Some((v, bound.span));
+                    }
+                }
+                if t.otherwise.is_none() {
+                    let msg = "a table by ranges needs `otherwise` for what lies above the last bound".to_string();
+                    self.mismatch(file, t.subject.span, msg);
+                }
+            }
+            other => {
+                let msg = format!("a table goes by a number, amount, date or enumeration, not {}", self.ty_name(other));
+                self.mismatch(file, t.subject.span, msg);
+            }
+        }
+        for row in &t.rows {
+            let v = self.expr(file, &row.value, scopes, owner);
+            unify(self, row.value.span, v);
+        }
+        if let Some(o) = &t.otherwise {
+            let v = self.expr(file, o, scopes, owner);
+            unify(self, o.span, v);
+        }
+        result
+    }
+
     fn binary(&mut self, file: usize, span: Span, op: BinOp, l: Ty, r: Ty) -> Ty {
         use BinOp::*;
-        let both = |a: Ty, b: Ty| format!("{} and {}", a.name(), b.name());
+        let both = |a: &Self| format!("{} and {}", a.ty_name(l), a.ty_name(r));
         match op {
             And | Or => {
                 self.expect(file, span, l, Ty::Bool);
@@ -922,41 +1434,64 @@ impl Analysis {
                 Ty::Bool
             }
             Eq | Ne => {
-                if Ty::unify(l, r).is_none() {
-                    self.mismatch(file, span, format!("cannot compare {}", both(l, r)));
+                match Ty::unify(l, r) {
+                    Some(Ty::Record(_) | Ty::List(_)) => {
+                        self.mismatch(file, span, "records and lists are compared field by field".into());
+                    }
+                    Some(_) => {}
+                    None => {
+                        let msg = format!("cannot compare {}", both(self));
+                        self.mismatch(file, span, msg);
+                    }
                 }
                 Ty::Bool
             }
             Lt | Le | Gt | Ge => match Ty::unify(l, r) {
                 Some(t) if t.is_numeric() || t == Ty::Date => Ty::Bool,
                 _ => {
-                    self.mismatch(file, span, format!("cannot order {}", both(l, r)));
+                    let msg = format!("cannot order {}", both(self));
+                    self.mismatch(file, span, msg);
                     Ty::Bool
                 }
             },
+            // Days after or before a date, and the days between two dates.
+            Add if l == Ty::Date && r.is_integral() || r == Ty::Date && l.is_integral() => Ty::Date,
+            Sub if l == Ty::Date && r.is_integral() => Ty::Date,
+            Sub if l == Ty::Date && r == Ty::Date => Ty::Int,
             Add | Sub => match Ty::unify(l, r) {
                 Some(t) if t.is_numeric() => t,
-                _ if (l == Ty::Money) != (r == Ty::Money) => self.mismatch(
-                    file,
-                    span,
-                    format!("cannot combine {} – write amounts with a currency, e.g. `5 EUR`", both(l, r)),
-                ),
-                _ => self.mismatch(file, span, format!("cannot add or subtract {}", both(l, r))),
+                _ if l.is_amount() != r.is_amount() => {
+                    let msg = format!("cannot combine {} – write amounts with their unit, e.g. `5 EUR`", both(self));
+                    self.mismatch(file, span, msg)
+                }
+                _ => {
+                    let msg = format!("cannot add or subtract {}", both(self));
+                    self.mismatch(file, span, msg)
+                }
             },
             Mul => match (l, r) {
-                (Ty::Money, s) | (s, Ty::Money) if s.is_scalar() => Ty::Money,
-                (Ty::Money, Ty::Money) => self.mismatch(file, span, "cannot multiply two amounts of money".into()),
+                (a, s) | (s, a) if a.is_amount() && s.is_scalar() => a,
+                _ if l.is_amount() && r.is_amount() => {
+                    let msg = format!("cannot multiply {} – divide an amount by its unit first", both(self));
+                    self.mismatch(file, span, msg)
+                }
                 _ => match Ty::unify(l, r) {
                     Some(t) if t.is_scalar() => t,
-                    _ => self.mismatch(file, span, format!("cannot multiply {}", both(l, r))),
+                    _ => {
+                        let msg = format!("cannot multiply {}", both(self));
+                        self.mismatch(file, span, msg)
+                    }
                 },
             },
             Div => match (l, r) {
-                (Ty::Money, s) if s.is_scalar() => Ty::Money,
-                (Ty::Money, Ty::Money) => Ty::Decimal,
+                (a, s) if a.is_amount() && s.is_scalar() => a,
+                (a, b) if a.is_amount() && a == b => Ty::Decimal,
                 _ => match Ty::unify(l, r) {
                     Some(t) if t.is_scalar() => Ty::Decimal,
-                    _ => self.mismatch(file, span, format!("cannot divide {}", both(l, r))),
+                    _ => {
+                        let msg = format!("cannot divide {}", both(self));
+                        self.mismatch(file, span, msg)
+                    }
                 },
             },
         }
@@ -968,22 +1503,17 @@ impl Analysis {
         let [x, step] = args else {
             return self.mismatch(file, e.span, format!("`{name}` takes a value and a step, e.g. `{name}(x, 1 EUR)`"));
         };
-        let positive = |n: &str| n.replace('_', "").parse::<f64>().is_ok_and(|v| v > 0.0);
-        let literal = match &step.kind {
-            ExprKind::Number(n) | ExprKind::Money(n, _) => positive(n),
-            _ => false,
-        };
-        if !literal {
+        let positive = crate::eval::literal(step).is_some_and(|v| v > crate::eval::Rat::int(0));
+        if !positive {
             let msg = format!("the step of `{name}` must be a positive number or amount written out, e.g. `1 EUR`");
             return self.mismatch(file, step.span, msg);
         }
         match Ty::unify(tys[0], tys[1]) {
             Some(t) if t.is_numeric() => t,
-            _ => self.mismatch(
-                file,
-                x.span.to(step.span),
-                format!("`{name}` rounds {} to a step of the same kind", tys[0].name()),
-            ),
+            _ => {
+                let msg = format!("`{name}` rounds {} to a step of the same kind", self.ty_name(tys[0]));
+                self.mismatch(file, x.span.to(step.span), msg)
+            }
         }
     }
 
@@ -1376,7 +1906,72 @@ mod tests {
         let e = messages(&a, Severity::Error);
         assert_eq!(e.len(), 2, "{e:?}");
         assert!(e[0].contains("expected bool, found number"));
-        assert!(e[1].contains("write amounts with a currency"));
+        assert!(e[1].contains("write amounts with their unit"));
+    }
+
+    #[test]
+    fn checks_enumerations_units_records_tables_and_norms_using_norms() {
+        let src = r#"module u
+            enum residence { value domestic value eu value third }
+            unit km
+            record supply { field amount : money field kind : residence }
+            norm total {
+              input supplies : list supply
+              rule sum_all : money = sum(s.amount for s in supplies where s.kind == residence.domestic)
+              rule n : int = count(s in supplies)
+              rule all_domestic : bool = all(s.kind == residence.domestic for s in supplies)
+            }
+            norm n {
+              input where_ : residence
+              input way : km
+              input day : date
+              input supplies : list supply
+              rule rate : decimal { by where_ domestic: 19 % eu: 7 % otherwise: 0 % }
+              rule zone : int { by way up to 10 km: 0 up to 30 km: 1 otherwise: 2 }
+              rule deadline : date = last_day(year(day) + 2, 2)
+              rule later : date = add_months(day, 3) + 1
+              rule span : int = deadline - day
+              rule t : money = total.sum_all(supplies = supplies)
+              rule far : bool = way / 1 km > 20
+            }"#;
+        let (_, a) = run(src);
+        assert!(messages(&a, Severity::Error).is_empty(), "{:?}", messages(&a, Severity::Error));
+        let ty = |id: &str| a.ty_name(a.member_types[&a.by_id[id]]);
+        assert_eq!(ty("u.n.where_"), "residence");
+        assert_eq!(ty("u.n.way"), "km");
+        assert_eq!(ty("u.total.supplies"), "list supply");
+        assert_eq!(ty("u.supply.kind"), "residence");
+        let (_, a) = run(r#"module u
+            enum residence { value domestic value eu }
+            unit km
+            unit kg
+            record supply { field amount : money }
+            norm total { input supplies : list supply input x : int rule s : money = sum(s.amount for s in supplies) }
+            norm n {
+              input where_ : residence
+              input w : km
+              input supplies : list supply
+              rule a : decimal { by where_ domestic: 1 }
+              rule b : int { by w up to 30 km: 0 up to 10 km: 1 otherwise: 2 }
+              rule c : int { by w up to 30 km: 0 }
+              rule d : bool = w > 3 kg
+              rule e : money = total.s(supplies = supplies)
+              rule f : money = total.s
+              rule g : int = supplies.amount
+              rule h : bool = where_ == residence.nowhere
+              rule i : km = 5 miles
+            }"#);
+        let e = messages(&a, Severity::Error);
+        let has = |s: &str| e.iter().any(|m| m.contains(s));
+        assert!(has("no row for eu"), "{e:?}");
+        assert!(has("the bounds of a table go up"), "{e:?}");
+        assert!(has("needs `otherwise`"), "{e:?}");
+        assert!(has("cannot order km and kg"), "{e:?}");
+        assert!(has("missing: x"), "{e:?}");
+        assert!(has("depends on its inputs"), "{e:?}");
+        assert!(has("only records have fields"), "{e:?}");
+        assert!(has("enumeration `residence` has no value `nowhere`"), "{e:?}");
+        assert!(has("unknown currency or unit `miles`"), "{e:?}");
     }
 
     #[test]

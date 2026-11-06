@@ -73,7 +73,16 @@ export interface GoalsAt {
 export interface NormInfo {
   id: string;
   label: string | null;
-  inputs: { name: string; label: string; type: string; judgement: boolean }[];
+  /** `type`: as written (`money`, `residence`, `list supply`); `kind`: what it is (`bool`, `enumeration`, `list` …). */
+  inputs: {
+    name: string;
+    label: string;
+    type: string;
+    kind: string;
+    /** The values of an enumeration, to choose from. */
+    values: { name: string; label: string | null }[];
+    judgement: boolean;
+  }[];
 }
 
 /** A member of a norm as evaluated: its value and, for a rule, its default and each exception tried. */

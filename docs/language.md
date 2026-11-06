@@ -201,8 +201,12 @@ norm small_business {
 }
 ```
 
-Types: `bool`, `money`, `int`, `decimal`, `date`. Operators: `and`, `or`, `not`, `< <= > >= == !=`, `+ - * /`,
-`if … then … else …`, `min(…)`, `max(…)`. Amounts carry a currency (`5 EUR`); money times a number is money.
+Types: `bool`, `money`, `int`, `decimal`, `date` – and the enumerations, units and records a module declares
+(below). Operators: `and`, `or`, `not`, `< <= > >= == !=`, `+ - * /`, `if … then … else …`. Amounts carry a
+currency (`5 EUR`); money times a number is money. `19 %` is the number 0.19.
+
+Functions: `min(…)`, `max(…)`, `abs(x)`; on whole numbers `div(a, b)` and `mod(a, b)` (rounding down, the remainder
+never negative); the rounding functions below; and those on dates further down.
 
 Rounding is part of the law, so it is part of the language: `round_down(x, 1 EUR)` ("abrunden"),
 `round_up(x, 1 EUR)` ("aufrunden") and `round(x, 0.01 EUR)` (to the nearest step, halves away from zero –
@@ -219,10 +223,109 @@ In Lean these are `verkodo.round_down`, `verkodo.round_up` and `verkodo.round` o
 `round` it would be 7,210, and Lean rejects the example.
 Exceptions are tried in order: the first `unless` whose condition holds gives the value, otherwise the default.
 
+### Tables
+
+Where the law gives a value by ranges or by cases, a rule is written as a table: `by` names what it goes by, each
+row gives a value, `otherwise` the rest. By ranges, every row reaches `up to` its bound – the bounds go up, so the
+rows neither leave a gap nor overlap; verkodo checks that the bounds written out ascend and that `otherwise` covers
+what lies above the last:
+
+```text
+rule tax_exact : money {
+  by x
+  up to basic_allowance: 0 EUR
+  up to 17_799 EUR: (914.51 EUR * y + 1_400 EUR) * y
+  …
+  otherwise: 0.45 * x - 19_470.38 EUR
+}
+```
+
+By an enumeration, the rows name its values; every value needs a row, or `otherwise` takes the rest:
+
+```text
+rule rate : decimal { by established domestic: 19 % eu_other: 7 % otherwise: 0 % }
+```
+
+A table is the default of its rule – `unless` may still override it. In Lean it is a chain of `bif` or a `match`.
+
+### Enumerations, units and records
+
+A module declares the types its norms share:
+
+```text
+enum residence {
+  label de "Ansässigkeit"
+  value domestic { label de "Inland" }
+  value eu_other { label de "übriges Gemeinschaftsgebiet" }
+  value third_country
+}
+
+unit km { label de "Kilometer" }
+
+record supply {
+  field amount : money
+  field kind : residence
+}
+```
+
+An **enumeration** has a fixed set of values, each with its labels; an input of it holds exactly one of them, so
+"both" and "neither" are not cases (`input established : residence`). Values are written with their enumeration
+(`established == residence.domestic`) and compared with `==` and `!=`. A **unit** is an amount other than money:
+`30 km`; only amounts of the same unit add up or compare, an amount times a number stays an amount, and an amount
+divided by its unit is a number (`distance / 1 km`). A unit is found by its name in any module, as long as only one
+declares it. A **record** groups fields: an input may be one record (`owner.age`) or a list of records
+(`input supplies : list supply`). Types of other modules are named by their path (`de.ustg.p1.supply`).
+
+Over a list, `sum`, `count`, `all` and `any`, each with an optional `where`:
+
+```text
+rule domestic : money = sum(s.amount for s in supplies where s.kind == residence.domestic)
+rule many : int = count(s in supplies)
+rule none_abroad : bool = all(s.kind == residence.domestic for s in supplies)
+```
+
+In Lean an enumeration is an `inductive` type, a record a `structure`, a list a `List`; the aggregates are
+`List.filter`, `map` and `sum`, `length`, `all` and `any`.
+
+### Dates
+
+Dates are compared, and days added: `day + 14` is two weeks later, `deadline - day` the days between. Functions take
+a date apart and put one together:
+
+| Function | Gives |
+|---|---|
+| `year(d)`, `quarter(d)`, `month(d)`, `day(d)` | the year, the quarter (1–4), the month (1–12), the day of the month |
+| `weekday(d)` | the day of the week, 1 Monday … 7 Sunday |
+| `date(y, m, d)` | the date – counting on past the end: month 13 is January of the next year, day 0 the last day of the month before |
+| `last_day(y, m)` | the last day of the month |
+| `add_months(d, n)`, `add_years(d, n)` | `n` months or years later, on the last day of the month where that month is shorter (§ 188 (2), (3) BGB) |
+
+So "the last day of February of the second calendar year after the taxable period" is
+`last_day(year(period_end) + 2, 2)`, and "from the beginning of the calendar quarter after it is received"
+`date(year(received), 3 * quarter(received) + 1, 1)`. What depends on a place – public holidays, a working day under
+§ 193 BGB – is not built in: each body of law declares it in a module of its own.
+
+In Lean these are `verkodo.year`, `verkodo.date`, `verkodo.add_months` and so on over day numbers – the same
+formulas as in verkodo, so a deadline is proved `by decide`.
+
+### Norms that use norms
+
+A rule may use a rule of another norm – of this module or another – for inputs given by name; every input of that
+norm is given once:
+
+```text
+rule turnover_prev : money = total_turnover.total(taxable = taxable_prev, exempt_listed = exempt_prev, …)
+```
+
+A constant of another norm needs no inputs: `small_business.limit_prev`. In Lean the call is the other norm's
+function applied to its inputs (`total_turnover.total { taxable := …, … }`); the generated file carries the
+enumerations, records and norms of the modules it uses.
+
 `verkodo prove` turns a norm into Lean: a namespace with the inputs as a structure `Inputs`, every constant a
 definition and every rule a function of the inputs (`def exempt (i : Inputs) : Bool`). Truth values are `Bool`,
-numbers and amounts rationals (`ℚ`) – exact, as the law computes. Lean type-checks the rules once more, and
-properties of a norm are ordinary theorems and examples about these functions:
+whole numbers and dates `ℤ`, other numbers and amounts rationals (`ℚ`) – exact, as the law computes; where a whole
+number meets a fraction it is converted (`↑n`). Lean type-checks the rules once more, and properties of a norm are ordinary theorems and examples about these
+functions:
 
 ```text
 theorem waiver_excludes {
@@ -239,7 +342,7 @@ example at_the_limits {   // a case with its expected result
 
 If a rule changes so that a property no longer holds – say `<` instead of `<=` for a limit that may be reached –
 Lean rejects the proof and the error lands on the theorem in the `.vk` file. Not exported yet (a warning instead):
-constants that depend on inputs, references to other norms, amounts in more than one currency.
+constants that depend on inputs.
 
 ### Obligations, permissions, prohibitions
 
@@ -314,11 +417,13 @@ under the old limits loses the exemption under the new ones with the same figure
 ## Open design questions
 
 - Objects whose parameters mention a concept (the limit of a convergent sequence needs a proof that it converges);
-  structures with several fields.
-- The legal profile in Lean: `int` as ℤ, norms that use other norms, a shorter way to write cases.
+  structures with several fields in mathematics.
+- The legal profile: a shorter way to write cases in Lean (all inputs of a norm are named); lists of other values
+  than records; several currencies; modules that use each other's norms in a circle.
 - Time: a case that spans versions (a calendar year across a change of law); transitional provisions; one
   function over all versions of a provision.
 - Translations: noticing that a translation is out of date once the original changes.
 - Deontic notions: who bears an obligation, which act several rules are about (so that conflicts can be found
-  without writing the theorem), deadlines. For judgements: the justification of a case, and typical cases
+  without writing the theorem), periods as a notion of their own (beginning and end by §§ 187, 188 BGB as functions
+of dates exist, the rules of a period not yet). For judgements: the justification of a case, and typical cases
   (*Fallgruppen*) as examples.

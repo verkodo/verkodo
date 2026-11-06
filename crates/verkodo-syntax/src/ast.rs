@@ -74,6 +74,9 @@ pub enum Item {
     Remark(Remark),
     Norm(Norm),
     Path(PathDecl),
+    Enum(EnumDecl),
+    Unit(UnitDecl),
+    Record(RecordDecl),
 }
 
 impl Item {
@@ -84,6 +87,9 @@ impl Item {
             Item::Remark(x) => &x.name,
             Item::Norm(x) => &x.name,
             Item::Path(x) => &x.name,
+            Item::Enum(x) => &x.name,
+            Item::Unit(x) => &x.name,
+            Item::Record(x) => &x.name,
         }
     }
 
@@ -94,6 +100,9 @@ impl Item {
             Item::Remark(x) => &x.meta,
             Item::Norm(x) => &x.meta,
             Item::Path(x) => &x.meta,
+            Item::Enum(x) => &x.meta,
+            Item::Unit(x) => &x.meta,
+            Item::Record(x) => &x.meta,
         }
     }
 }
@@ -175,10 +184,76 @@ pub struct Norm {
     pub span: Span,
 }
 
+/// The type of an input, judgement, constant, rule or field: a built-in type (`money`), an enumeration, a unit or a
+/// record declared in some module (`residence`, `de.ustg.p1.supply`), or a list of records (`list supply`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeRef {
+    pub list: bool,
+    pub name: Path,
+    pub span: Span,
+}
+
+impl TypeRef {
+    /// A built-in type at `span`, such as the `bool` of an obligation.
+    pub fn builtin(name: &str, span: Span) -> TypeRef {
+        let name = Name { text: name.into(), span };
+        TypeRef { list: false, name: Path { segments: vec![name], span }, span }
+    }
+
+    /// As written: `money`, `list supply`.
+    pub fn text(&self) -> String {
+        if self.list { format!("list {}", self.name.joined()) } else { self.name.joined() }
+    }
+}
+
+/// An enumeration: a type with a fixed set of values, each with its own labels – `enum residence { value domestic
+/// value eu_other value third_country }`.
+#[derive(Clone, Debug)]
+pub struct EnumDecl {
+    pub name: Name,
+    pub meta: Meta,
+    pub values: Vec<EnumValue>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumValue {
+    pub name: Name,
+    pub meta: Meta,
+    pub span: Span,
+}
+
+/// A unit of measurement other than money (`unit km`): amounts of it are written `30 km`, and only amounts of the
+/// same unit add up or compare.
+#[derive(Clone, Debug)]
+pub struct UnitDecl {
+    pub name: Name,
+    pub meta: Meta,
+    pub span: Span,
+}
+
+/// A record: several named fields that belong together – one supply with its amount and kind. Inputs may be one
+/// record or a list of them.
+#[derive(Clone, Debug)]
+pub struct RecordDecl {
+    pub name: Name,
+    pub meta: Meta,
+    pub fields: Vec<RecordField>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct RecordField {
+    pub name: Name,
+    pub ty: TypeRef,
+    pub meta: Meta,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug)]
 pub struct Member {
     pub name: Name,
-    pub ty: Name,
+    pub ty: TypeRef,
     pub meta: Meta,
     pub kind: MemberKind,
     /// For a rule written `obligation`, `permission` or `prohibition`: what it says about the act it names. Such a
@@ -259,8 +334,13 @@ pub enum UnOp {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
+    /// A member, a constant of another norm, an enumeration value, a variable of an aggregate – and fields of
+    /// records after it (`owner.age`, `s.amount`).
     Ref(Path),
     Number(String),
+    /// `19 %`: the number divided by 100.
+    Percent(String),
+    /// An amount: of money (`5 EUR`) or of a unit (`30 km`).
     Money(String, Name),
     Bool(bool),
     Date(String),
@@ -269,7 +349,47 @@ pub enum ExprKind {
     Paren(Box<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Call(Path, Vec<Expr>),
+    /// `sum(s.amount for s in supplies where s.taxable)`, `count(s in supplies where …)`, `all(…)`, `any(…)`.
+    Aggregate(Box<Aggregate>),
+    /// A rule or constant of another norm, for inputs given by name: `total_turnover.total(taxable = x, …)`.
+    Apply(Path, Vec<(Name, Expr)>),
+    /// A table: a value by ranges of a number or by the values of an enumeration.
+    Table(Box<Table>),
     Error,
+}
+
+/// `<func>(<body> for <var> in <list> where <filter>)`; `count` has no body (`count(s in supplies)`).
+#[derive(Clone, Debug)]
+pub struct Aggregate {
+    pub func: Name,
+    pub body: Option<Expr>,
+    pub var: Name,
+    pub list: Expr,
+    pub filter: Option<Expr>,
+}
+
+/// The rows of a rule written `by <subject>`: `up to <bound>: <value>` for ranges, ascending, or `<value of an
+/// enumeration>: <value>`, and `otherwise: <value>` for the rest.
+#[derive(Clone, Debug)]
+pub struct Table {
+    pub subject: Expr,
+    pub rows: Vec<Row>,
+    pub otherwise: Option<Expr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Row {
+    pub key: RowKey,
+    pub value: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum RowKey {
+    /// `up to <bound>`: the subject at most this.
+    UpTo(Expr),
+    /// A value of the enumeration the subject is of.
+    Value(Path),
 }
 
 /// A path through the knowledge: a lecture, a guide, a commentary.

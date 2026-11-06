@@ -68,10 +68,22 @@
               <option value="true">{de ? "ja" : "yes"}</option>
               <option value="false">{de ? "nein" : "no"}</option>
             </select>
+          {:else if i.kind === "enumeration"}
+            <select bind:value={given[i.name]}>
+              <option value="">–</option>
+              {#each i.values as v (v.name)}<option value={v.name}>{v.label ?? v.name}</option>{/each}
+            </select>
+          {:else if i.kind === "record" || i.kind === "list"}
+            <textarea
+              bind:value={given[i.name]}
+              rows="3"
+              placeholder={i.kind === "list" ? '[{"field": "value"}]' : '{"field": "value"}'}
+              spellcheck="false"
+            ></textarea>
           {:else}
             <input
               bind:value={given[i.name]}
-              placeholder={i.type === "date" ? "2025-01-01" : i.type === "money" ? "25000 EUR" : "0"}
+              placeholder={i.type === "date" ? "2025-01-01" : i.type === "money" ? "25000 EUR" : i.kind === "amount" ? `0 ${i.type}` : "0"}
               spellcheck="false"
             />
           {/if}
@@ -134,7 +146,8 @@
     color: var(--accent);
   }
   input,
-  select {
+  select,
+  textarea {
     font: inherit;
     padding: 0.2rem 0.35rem;
     border: 1px solid var(--border);

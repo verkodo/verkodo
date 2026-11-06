@@ -421,6 +421,11 @@ fn symbol_kind(kind: SymKind) -> u32 {
         SymKind::Constant => 14,                   // Constant
         SymKind::Rule => 12,                       // Function
         SymKind::Path => 18,                       // Array
+        SymKind::Enum => 10,                       // Enum
+        SymKind::Value => 22,                      // EnumMember
+        SymKind::Unit => 26,                       // TypeParameter
+        SymKind::Record => 23,                     // Struct
+        SymKind::Field => 8,                       // Field
     }
 }
 

@@ -284,11 +284,26 @@ impl Editor {
                     .into_iter()
                     .filter(|s| matches!(self.a.symbols[s.sym].kind, SymKind::Input | SymKind::Judgement))
                     .map(|s| {
-                        let ty = self.a.member_types.get(&s.sym).map(|t| t.name()).unwrap_or("?");
+                        let ty = self.a.member_types.get(&s.sym).copied().unwrap_or(verkodo_core::Ty::Unknown);
+                        // An enumeration: its values to choose from.
+                        let values: Vec<Value> = match ty {
+                            verkodo_core::Ty::Enum(e) => (0..self.a.symbols.len())
+                                .filter(|&v| self.a.symbols[v].kind == SymKind::Value && self.a.parent(v) == Some(e))
+                                .map(|v| {
+                                    json!({
+                                        "name": self.a.symbols[v].id.rsplit('.').next().unwrap_or_default(),
+                                        "label": self.a.label(&self.ws, v, &self.lang),
+                                    })
+                                })
+                                .collect(),
+                            _ => Vec::new(),
+                        };
                         json!({
                             "name": self.a.symbols[s.sym].id.rsplit('.').next().unwrap_or_default(),
                             "label": self.a.label(&self.ws, s.sym, &self.lang).unwrap_or_default(),
-                            "type": ty,
+                            "type": self.a.ty_name(ty),
+                            "kind": ty.name(),
+                            "values": values,
                             "judgement": self.a.symbols[s.sym].kind == SymKind::Judgement,
                         })
                     })
@@ -310,10 +325,10 @@ impl Editor {
                     "id": sym.id,
                     "kind": sym.kind.keyword(),
                     "label": self.a.label(&self.ws, s.sym, &self.lang),
-                    "value": s.value.to_string(),
+                    "value": s.value.show(&self.a),
                     "known": !matches!(s.value, verkodo_core::eval::Value::Unknown(_)),
-                    "default": s.default.map(|d| d.to_string()),
-                    "exceptions": s.exceptions.iter().map(|(c, d)| json!([c.to_string(), d])).collect::<Vec<_>>(),
+                    "default": s.default.map(|d| d.show(&self.a)),
+                    "exceptions": s.exceptions.iter().map(|(c, d)| json!([c.show(&self.a), d])).collect::<Vec<_>>(),
                     "file": sym.loc.file(),
                     "from": utf16(self.text(sym.loc.file()), sym.span.start),
                     "to": utf16(self.text(sym.loc.file()), sym.span.end),
