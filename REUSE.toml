@@ -13,7 +13,7 @@ SPDX-FileCopyrightText = "falkOSS – Falcon Lake Open Source Software gUG (haft
 path = ["**/*.md", "**/.gitignore", "Cargo.lock", "api/openapi.json", "web/package.json", "web/pnpm-lock.yaml",
   "web/tsconfig.json", "web/src/lib/api-types.ts", "lean/lean-toolchain", "lean/lake-manifest.json",
   "editors/vscode/*.json", "editors/vscode/syntaxes/*.json", "editors/vscode/pnpm-lock.yaml",
-  "editors/vscode/.vscodeignore"]
+  "editors/vscode/.vscodeignore", "editors/vscode/pnpm-workspace.yaml"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "falkOSS – Falcon Lake Open Source Software gUG (haftungsbeschränkt) i. G. and the verkodo contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"

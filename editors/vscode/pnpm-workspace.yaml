@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# pnpm's settings for the VS Code extension: exact versions when adding one, none younger than 14 days (in
+# minutes) – as for the web app – esbuild may run its install script (it fetches its binary
+# for the platform), vsce-sign may not.
+savePrefix: ""
+minimumReleaseAge: 20160
+allowBuilds:
+  esbuild: true
+  # Signs packages for the Marketplace by fetching a program – not needed to build or package.
+  "@vscode/vsce-sign": false
