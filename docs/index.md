@@ -18,4 +18,7 @@ cargo install verkodo
 verkodo serve      # the web editor at http://127.0.0.1:8080
 ```
 
+The knowledge written in verkodo – mathematics and law, sourced and checked by Lean – grows in
+[sciaro](https://github.com/verkodo/sciaro), starting with § 19 UStG.
+
 What to write: [the language]({{ '/language.html' | relative_url }}); working with it: [editors]({{ '/editors.html' | relative_url }}) and [the API]({{ '/api.html' | relative_url }}).

@@ -5,8 +5,10 @@
 verkodo writes knowledge down formally instead of as prose – mathematics first, then German and, later, European law. A concept can have several definitions, joined by bridges that prove them equivalent; a lecture, a guide or a commentary is a path through them; Lean 4 checks the proofs. Text, PDF and web pages in any language are generated from it, and every word in them is explained down to its foundations – the links come from the formalisation, nobody sets them by hand. It is for people who teach, learn, write or apply mathematics and law.
 
 verkodo is at its beginning: a first version of the language reads `.vk` files, checks them, lets Lean check the
-proofs and writes HTML pages in which every term explains itself on hover. There is no release yet.
-The idea and the plan are in the [whitepaper](https://github.com/verkodo/whitepaper).
+proofs and writes HTML pages in which every term explains itself on hover. Version 0.2 is on crates.io.
+The idea and the plan are in the [whitepaper](https://github.com/verkodo/whitepaper). The knowledge itself –
+mathematics and law, sourced and checked – grows in [verkodo/sciaro](https://github.com/verkodo/sciaro) (Esperanto
+for a body of knowledge); [examples/](examples/) here only shows the language.
 The documentation is at [verkodo.github.io/verkodo](https://verkodo.github.io/verkodo/) (later verkodo.dev).
 
 | Path | What |
