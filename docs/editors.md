@@ -36,14 +36,17 @@ Lean's `.lake`), `target` and `node_modules`.
 
 ## Setting it up
 
-There is no editor extension yet; an editor that lets you name a language server for a file type is enough.
+For VS Code there is an extension; any other editor that lets you name a language server for a file type is enough.
 
 - **Neovim:** tried on 2026-11-06 with Neovim 0.12.6 and the configuration below, unchanged: it attaches to `.vk`
   files with the repository as root; hover, go to definition, the outline and diagnostics while typing work; after
   saving, Lean's verdict arrived after about a minute (all example files), and then `tendsto_nhds_unique` explained
   itself and led into Mathlib's sources.
 - **Helix:** the configuration is what Helix documents for a language server of its own. **OPEN:** not tried yet.
-- **VS Code** and others: **OPEN** – they need an extension or a generic language client.
+- **VS Code:** the extension in `editors/vscode` – highlighting and the language server, with the options below as
+  settings (`verkodo.path`, `verkodo.lang`, `verkodo.lean`, `verkodo.style`, `verkodo.width`). Until it is on the
+  Marketplace and Open VSX (**OPEN**): `pnpm package` there, then *Extensions → … → Install from VSIX*. The grammar is
+  tested as VS Code tokenizes (`pnpm test`); **OPEN:** tried in VS Code itself.
 
 **Helix** (`languages.toml`):
 

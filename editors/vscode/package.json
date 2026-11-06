@@ -1,0 +1,113 @@
+{
+  "name": "verkodo",
+  "displayName": "verkodo",
+  "description": "verkodo – mathematics and law written formally, checked by machine: highlighting, and the verkodo language server (diagnostics, hover, go to definition, outline, formatting, Lean on save).",
+  "version": "0.3.0",
+  "publisher": "falkoss",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/verkodo/verkodo"
+  },
+  "homepage": "https://verkodo.github.io/verkodo/editors.html",
+  "icon": "icon.png",
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "verkodo",
+        "aliases": [
+          "verkodo"
+        ],
+        "extensions": [
+          ".vk"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "verkodo",
+        "scopeName": "source.verkodo",
+        "path": "./syntaxes/verkodo.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "verkodo",
+      "properties": {
+        "verkodo.path": {
+          "type": "string",
+          "default": "verkodo",
+          "markdownDescription": "The `verkodo` program (`cargo install verkodo`); a name on the `PATH` or a full path."
+        },
+        "verkodo.lang": {
+          "type": "string",
+          "enum": [
+            "de",
+            "en"
+          ],
+          "default": "de",
+          "markdownDescription": "The language of hover texts."
+        },
+        "verkodo.lean": {
+          "type": [
+            "string",
+            "boolean"
+          ],
+          "default": "",
+          "markdownDescription": "The Lean project Lean checks in on save; `false` for none; empty: `lean/` in the workspace, if it has a `lakefile.toml`."
+        },
+        "verkodo.style": {
+          "type": "string",
+          "enum": [
+            "",
+            "delimiters",
+            "indentation"
+          ],
+          "default": "",
+          "markdownDescription": "How formatting writes a file: with delimiters (`{ … }`, `\"…\"`, fences) or by indentation; empty: only tabs become spaces."
+        },
+        "verkodo.width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "default": null,
+          "markdownDescription": "The widest line of text when formatting; longer labels, texts, criteria and sources are broken into lines (needs `verkodo.style`)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "verkodo.restart",
+        "title": "verkodo: Restart the language server"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p . --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --minify --outfile=out/extension.js",
+    "test": "node test/grammar.mjs",
+    "package": "pnpm build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/vscode": "1.91.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  },
+  "packageManager": "pnpm@12.13.0"
+}

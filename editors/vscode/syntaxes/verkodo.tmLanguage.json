@@ -1,0 +1,187 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "verkodo",
+  "scopeName": "source.verkodo",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#fence"
+    },
+    {
+      "include": "#lean-line"
+    },
+    {
+      "include": "#text-line"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#declaration"
+    },
+    {
+      "include": "#keyword"
+    },
+    {
+      "include": "#type"
+    },
+    {
+      "include": "#date"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#operator"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.verkodo",
+      "match": "//.*$"
+    },
+    "fence": {
+      "name": "meta.embedded.block.lean.verkodo",
+      "begin": "```",
+      "end": "```",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.verkodo"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.verkodo"
+        }
+      },
+      "contentName": "source.lean4.embedded.verkodo"
+    },
+    "lean-line": {
+      "comment": "`lean` and a formula: in quotes, or without them to the end of the line.",
+      "patterns": [
+        {
+          "name": "string.quoted.double.lean.verkodo",
+          "begin": "\\b(lean)\\s*(\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.verkodo"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.verkodo"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.verkodo"
+            }
+          },
+          "contentName": "source.lean4.embedded.verkodo",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.verkodo"
+            }
+          ]
+        },
+        {
+          "match": "\\b(lean)\\s+([^\\s\"`].*)$",
+          "captures": {
+            "1": {
+              "name": "keyword.other.verkodo"
+            },
+            "2": {
+              "name": "source.lean4.embedded.verkodo"
+            }
+          }
+        }
+      ]
+    },
+    "text-line": {
+      "comment": "`label`, `text`, `criteria` and a language, or `source`: text in quotes, or without them to the end of the line.",
+      "patterns": [
+        {
+          "begin": "\\b(?:(label|text|criteria)\\s+([a-z]{2})|(source))\\s*(?=\")",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.other.verkodo"
+            },
+            "2": {
+              "name": "constant.language.lang.verkodo"
+            },
+            "3": {
+              "name": "keyword.other.verkodo"
+            }
+          },
+          "end": "(?<=\")",
+          "patterns": [
+            {
+              "include": "#string"
+            }
+          ]
+        },
+        {
+          "match": "\\b(?:(label|text|criteria)\\s+([a-z]{2})|(source))\\s+([^\\s\"].*)$",
+          "captures": {
+            "1": {
+              "name": "keyword.other.verkodo"
+            },
+            "2": {
+              "name": "constant.language.lang.verkodo"
+            },
+            "3": {
+              "name": "keyword.other.verkodo"
+            },
+            "4": {
+              "name": "string.unquoted.verkodo"
+            }
+          }
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.verkodo",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.verkodo",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "declaration": {
+      "match": "\\b(module|translation|concept|variant|theorem|example|remark|path|norm|input|judgement|constant|rule|obligation|permission|prohibition|enum|value|unit|record|field)\\s+([\\p{L}_][\\p{L}\\p{N}_.]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.verkodo"
+        },
+        "2": {
+          "name": "entity.name.verkodo"
+        }
+      }
+    },
+    "keyword": {
+      "name": "keyword.other.verkodo",
+      "match": "\\b(original|bridge|step|params|type|statement|proof|using|about|valid|from|to|replaces|default|when|unless|then|if|else|by|up|otherwise|for|in|where)\\b"
+    },
+    "type": {
+      "name": "support.type.verkodo",
+      "match": "\\b(bool|money|int|decimal|date|list)\\b"
+    },
+    "date": {
+      "name": "constant.numeric.date.verkodo",
+      "match": "\\b\\d{4}-\\d{2}-\\d{2}\\b"
+    },
+    "number": {
+      "name": "constant.numeric.verkodo",
+      "match": "\\b\\d[\\d_]*(?:\\.\\d+)?\\b"
+    },
+    "operator": {
+      "name": "keyword.operator.verkodo",
+      "match": "<->|->|<=|>=|==|!=|[<>=+\\-*/%]|\\b(and|or|not)\\b"
+    }
+  }
+}

@@ -12,3 +12,7 @@
 /lean/.lake
 /lean/generated
 /out
+# The VS Code extension: its packages, its build and its packages for the marketplace.
+/editors/vscode/node_modules
+/editors/vscode/out
+/editors/vscode/*.vsix
