@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "http-body-util",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-lean"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-lsp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "lsp-server",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-render"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "verkodo-core",
  "verkodo-syntax",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-sdk"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "verkodo-core",
  "verkodo-lean",
@@ -959,11 +959,11 @@ dependencies = [
 
 [[package]]
 name = "verkodo-syntax"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "verkodo-wasm"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "verkodo-web"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "getrandom",

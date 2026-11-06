@@ -4,7 +4,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.99"
 license = "AGPL-3.0-or-later"
@@ -17,14 +17,14 @@ publish = false
 # (scripts/check-age.py). Ranges, not exact versions, so that programs building verkodo's crates in can resolve them
 # with their own dependencies.
 [workspace.dependencies]
-verkodo-api = { path = "crates/verkodo-api", version = "0.2.0" }
-verkodo-core = { path = "crates/verkodo-core", version = "0.2.0" }
-verkodo-lean = { path = "crates/verkodo-lean", version = "0.2.0" }
-verkodo-lsp = { path = "crates/verkodo-lsp", version = "0.2.0" }
-verkodo-render = { path = "crates/verkodo-render", version = "0.2.0" }
-verkodo-sdk = { path = "crates/verkodo-sdk", version = "0.2.0" }
-verkodo-syntax = { path = "crates/verkodo-syntax", version = "0.2.0" }
-verkodo-web = { path = "crates/verkodo-web", version = "0.2.0" }
+verkodo-api = { path = "crates/verkodo-api", version = "0.3.0" }
+verkodo-core = { path = "crates/verkodo-core", version = "0.3.0" }
+verkodo-lean = { path = "crates/verkodo-lean", version = "0.3.0" }
+verkodo-lsp = { path = "crates/verkodo-lsp", version = "0.3.0" }
+verkodo-render = { path = "crates/verkodo-render", version = "0.3.0" }
+verkodo-sdk = { path = "crates/verkodo-sdk", version = "0.3.0" }
+verkodo-syntax = { path = "crates/verkodo-syntax", version = "0.3.0" }
+verkodo-web = { path = "crates/verkodo-web", version = "0.3.0" }
 anyhow = "1.0.104"
 axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
