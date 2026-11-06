@@ -1,0 +1,217 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "verkodo",
+    "description": "The open API of verkodo: truth code – mathematics and law written formally, checked by machine.",
+    "license": {
+      "name": "AGPL-3.0-or-later",
+      "identifier": "AGPL-3.0-or-later"
+    },
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/api/v1/lean": {
+      "get": {
+        "tags": [],
+        "summary": "Whether `prove` is switched on.",
+        "operationId": "lean_info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeanInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prove": {
+      "post": {
+        "tags": [],
+        "summary": "Lets Lean check the files. One check at a time; it can take a minute or more.",
+        "operationId": "prove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProveResult"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Lean is switched off on this server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Lean is busy with another check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DiagnosticView": {
+        "type": "object",
+        "description": "A message about a place in a file; `start` and `end` are byte offsets in its text.",
+        "required": [
+          "file",
+          "start",
+          "end",
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "end": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "description": "`error` or `warning`."
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "LeanInfo": {
+        "type": "object",
+        "description": "Whether this server lets Lean check (`verkodo serve --lean <dir>`).",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "An error: what was refused or went wrong.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "What happened, in English."
+          }
+        }
+      },
+      "ProveRequest": {
+        "type": "object",
+        "description": "Files to let Lean check – all files that belong together, in the order the editor keeps them.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceText"
+            }
+          }
+        }
+      },
+      "ProveResult": {
+        "type": "object",
+        "description": "What Lean said.",
+        "required": [
+          "checked",
+          "open",
+          "rejected",
+          "diagnostics",
+          "report"
+        ],
+        "properties": {
+          "checked": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticView"
+            },
+            "description": "Diagnostics of verkodo and of Lean."
+          },
+          "open": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rejected": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "report": {
+            "type": "object",
+            "description": "Lean's verdict on every part and the names it resolved – for verkodo in the browser (`ReportData`); its\nnumbers belong to these files, analysed by this version of verkodo."
+          }
+        }
+      },
+      "SourceText": {
+        "type": "object",
+        "description": "A source file to check, as an editor holds it.",
+        "required": [
+          "path",
+          "text"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo-syntax"
+description = "Lexer, parser, syntax tree and formatter of the verkodo language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["verkodo","parser","formatter","formal-methods"]
+categories = ["parser-implementations","mathematics"]
+
+[dependencies]
+
+[lints]
+workspace = true

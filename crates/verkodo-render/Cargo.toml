@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo-render"
+description = "Pages of verkodo knowledge: HTML with nested hover, Typst for PDF, Markdown for editors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["verkodo","html","typst","pdf","formal-methods"]
+categories = ["mathematics","text-processing"]
+
+# The formats, each on its own: `html` (pages with nested hover, cards, the style), `typst` (a path as a document for
+# PDF), `markdown` (hover in editors). LaTeX is planned.
+[features]
+default = ["html", "typst", "markdown"]
+html = []
+typst = []
+markdown = []
+
+[dependencies]
+verkodo-syntax.workspace = true
+verkodo-core.workspace = true
+
+[lints]
+workspace = true

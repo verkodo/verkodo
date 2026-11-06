@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: CC-BY-4.0
+//
+// French for analysis.folgen – a translation: the module is written in German and English (its original
+// languages); this file adds French. Not every text is translated yet: `verkodo translations examples --missing`
+// shows what is left.
+
+translation analysis.folgen
+
+converges
+  label fr converge vers
+converges.eps_n
+  label fr définition ε-N
+converges.filter
+  label fr par les filtres de voisinages
+converges.metric
+  label fr par la distance dans un espace métrique
+
+distance
+  label fr distance
+distance.absolute
+  label fr par la valeur absolue
+distance.root
+  label fr par la racine carrée
+distance_symm
+  label fr La distance est symétrique
+
+bounded
+  label fr bornée
+bounded.abs
+  label fr par la valeur absolue
+
+const_converges
+  label fr Les suites constantes convergent
+limit_unique
+  label fr Unicité de la limite
+limit_notation
+  label fr Notation
+  text fr Comme la limite est unique, on peut parler de la limite et écrire lim a.
+
+analysis1
+  label fr Analyse I – suites (approche ε-N)

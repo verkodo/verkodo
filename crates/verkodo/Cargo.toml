@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo"
+description = "Truth code – mathematics and law written formally, checked by machine: the verkodo command line"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["verkodo","lean","law-as-code","mathematics","formal-methods"]
+categories = ["command-line-utilities","mathematics"]
+readme = "../../README.md"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+verkodo-api.workspace = true
+verkodo-web.workspace = true
+verkodo-sdk.workspace = true
+verkodo-lsp.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

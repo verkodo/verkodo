@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo-wasm"
+description = "verkodo in the browser: diagnostics, hover, definition, outline and a preview for the web editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Not on crates.io: the module of the web editor, built with the web app.
+publish = false
+
+[lib]
+# cdylib for WebAssembly, rlib for the tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+verkodo-core.workspace = true
+# Pages and cards as HTML only.
+verkodo-render = { workspace = true, default-features = false, features = ["html"] }
+verkodo-syntax.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# The workspace's lints, but `unsafe_code` denied instead of forbidden: exporting a function to JavaScript needs
+# `#[unsafe(no_mangle)]`, allowed on exactly those functions and nowhere else.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

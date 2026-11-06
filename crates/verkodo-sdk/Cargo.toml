@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo-sdk"
+description = "The SDK of verkodo: every command and query on verkodo knowledge – what the command line, the language server, the API and IDEs build on"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["verkodo","sdk","formal-methods","law-as-code","lean"]
+categories = ["mathematics"]
+
+[dependencies]
+verkodo-core.workspace = true
+verkodo-syntax.workspace = true
+verkodo-lean.workspace = true
+verkodo-render.workspace = true
+
+[lints]
+workspace = true

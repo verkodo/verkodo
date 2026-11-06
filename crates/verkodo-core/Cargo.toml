@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo-core"
+description = "The domain of verkodo without I/O: knowledge graph, checks, versions, translations, exact evaluation of norms"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["verkodo","knowledge-graph","law-as-code","formal-methods","mathematics"]
+categories = ["mathematics","data-structures"]
+
+[dependencies]
+verkodo-syntax.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

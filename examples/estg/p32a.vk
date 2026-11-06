@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: CC-BY-4.0
+//
+// § 32a para. 1 EStG (income tax scale) – the tariff with its two roundings. Not tax advice.
+// Checked against the official text at https://www.gesetze-im-internet.de/estg/__32a.html (retrieved 2026-11-06),
+// which gives this scale from the assessment period 2026 on: the taxable income rounded down to full euros, five
+// zones, the resulting tax rounded down to the next full euro. Left out: §§ 32b, 32d, 34, 34a, 34b and 34c, which
+// the paragraph reserves, and splitting (para. 5).
+// The expected amounts in the examples were computed with exact fractions before Lean checked them.
+//
+// Written by indentation – no braces, no quotes, no fences; the other examples use them. Both mean the same.
+
+module estg.p32a original de, en
+
+norm income_tax
+  label de Einkommensteuertarif
+  label en Income tax scale
+  source § 32a Abs. 1 EStG in der ab dem Veranlagungszeitraum 2026 geltenden Fassung
+  valid from 2026-01-01
+
+  input taxable_income : money
+    label de zu versteuerndes Einkommen
+    label en taxable income
+
+  constant basic_allowance : money = 12_348 EUR
+    label de Grundfreibetrag
+    label en basic allowance
+    source § 32a Abs. 1 Satz 2 Nr. 1 EStG
+
+  rule x : money = round_down(taxable_income, 1 EUR)
+    label de auf volle Euro abgerundetes zu versteuerndes Einkommen
+    label en taxable income rounded down to full euros
+    source § 32a Abs. 1 Satz 1 EStG
+
+  rule y : decimal = (x - basic_allowance) / 10_000 EUR
+    label de y (Zone 2)
+    label en y (zone 2)
+    source § 32a Abs. 1 EStG
+
+  rule z : decimal = (x - 17_799 EUR) / 10_000 EUR
+    label de z (Zone 3)
+    label en z (zone 3)
+    source § 32a Abs. 1 EStG
+
+  rule tax_exact : money =
+      if x <= basic_allowance then 0 EUR
+      else if x <= 17_799 EUR then (914.51 EUR * y + 1_400 EUR) * y
+      else if x <= 69_878 EUR then (173.10 EUR * z + 2_397 EUR) * z + 1_034.87 EUR
+      else if x <= 277_825 EUR then 0.42 * x - 11_135.63 EUR
+      else 0.45 * x - 19_470.38 EUR
+    label de Steuerbetrag vor dem Abrunden
+    label en tax before rounding down
+    source § 32a Abs. 1 Satz 2 EStG
+
+  rule tax : money = round_down(tax_exact, 1 EUR)
+    label de tarifliche Einkommensteuer
+    label en income tax under the scale
+    source § 32a Abs. 1 Satz 3 EStG
+
+example at_the_basic_allowance
+  label de Bis zum Grundfreibetrag keine Steuer – auch mit Cent darüber
+  label en No tax up to the basic allowance – even with cents above it
+  statement lean income_tax.tax { taxable_income := 12348.99 } = 0
+  proof lean
+    by norm_num [income_tax.tax, income_tax.tax_exact, income_tax.x, income_tax.basic_allowance,
+      verkodo.round_down]
+
+example forty_thousand
+  label de 40.000 €: 7.209,63… € werden zu 7.209 € abgerundet
+  label en 40,000 euros: 7,209.63… euros are rounded down to 7,209
+  statement lean income_tax.tax { taxable_income := 40000 } = 7209
+  proof lean
+    by norm_num [income_tax.tax, income_tax.tax_exact, income_tax.x, income_tax.z, income_tax.basic_allowance,
+      verkodo.round_down]
+
+example cents_do_not_count
+  label de Cent beim Einkommen ändern die Steuer nicht
+  label en Cents of income do not change the tax
+  statement lean income_tax.tax { taxable_income := 40000.99 } = income_tax.tax { taxable_income := 40000 }
+  proof lean
+    by norm_num [income_tax.tax, income_tax.tax_exact, income_tax.x, income_tax.z, income_tax.basic_allowance,
+      verkodo.round_down]
+
+path tariff
+  label de Wie der Einkommensteuertarif rechnet
+  label en How the income tax scale computes
+  step income_tax
+  step at_the_basic_allowance
+  step forty_thousand
+  step cents_do_not_count

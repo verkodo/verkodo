@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: CC-BY-4.0
+//
+// § 19 UStG (small business scheme) – a simplified slice to try the language. Not legal advice.
+// Two versions of the provision, one replacing the other:
+// - from 2025-01-01: checked against the official text at https://www.gesetze-im-internet.de/ustg_1980/__19.html
+//   (retrieved 2026-11-06): the limits in para. 1 sentence 1 (25,000 and 100,000 euros, "not exceeded"), the waiver
+//   in para. 3. The date it applies from, and the version before it, from the unofficial compilation buzer.de
+//   (https://www.buzer.de/19_UStG.htm and its comparisons, retrieved 2026-11-06).
+// - 2020-01-01 to 2024-12-31: para. 1 sentence 1 as shown on buzer.de: 22,000 euros in the previous year "zuzüglich
+//   der darauf entfallenden Steuer", 50,000 euros "voraussichtlich" in the current year (22,000 since 2020-01-01,
+//   17,500 before); the waiver in para. 2. OPEN: checked against the Federal Law Gazette.
+// The expected turnover of the old version is a judgement (an undetermined legal term), not a fact: its criteria from
+// Haufe (see the judgement; OPEN: the administrative guidance itself, UStAE 19.1).
+// The waiver (para. 3) also as what it allows and forbids: the permission to waive, the prohibition to revoke within
+// five calendar years, the permission to revoke afterwards. Left out: the deadline for the declaration.
+// Left out: what counts as total turnover, businesses established elsewhere in the EU, new vehicles, what happens
+// within the year once a limit is exceeded, the binding period of a waiver, and amendments within 2020–2024 that do
+// not change the limits.
+// `verkodo prove` turns the norms into Lean functions; the theorems below are properties Lean checks.
+
+module ustg.p19 original de, en
+
+norm small_business_2020 {
+  label de "Kleinunternehmer (Fassung 2020–2024)"
+  label en "Small business scheme (2020–2024 version)"
+  source "§ 19 UStG in der vom 2020-01-01 bis 2024-12-31 geltenden Fassung"
+  valid from 2020-01-01 to 2024-12-31
+
+  input resident : bool {
+    label de "im Inland ansässig"
+    label en "established in Germany"
+  }
+  input turnover_prev : money {
+    label de "Umsatz zuzüglich Steuer im vorangegangenen Kalenderjahr"
+    label en "turnover plus tax in the previous calendar year"
+  }
+  // "voraussichtlich": not a fact but a forecast – an undetermined legal term.
+  judgement turnover_curr : money {
+    label de "voraussichtlicher Umsatz zuzüglich Steuer im laufenden Kalenderjahr"
+    label en "expected turnover plus tax in the current calendar year"
+    criteria de "Der sachgerecht geschätzte Gesamtumsatz des laufenden Jahres. Wird die Grenze entgegen der Prognose überschritten, bleibt es für dieses Jahr bei der Befreiung."
+    criteria en "The total turnover of the current year as reasonably estimated. If it exceeds the limit contrary to the forecast, the exemption stays for that year."
+    source "§ 19 Abs. 1 Satz 1 UStG a. F. („voraussichtlich“)"
+    source "Haufe, Kleinunternehmer: Voraussetzungen, https://www.haufe.de/id/beitrag/kleinunternehmer-2-voraussetzungen-HI1342176.html (abgerufen 2026-11-06; OPEN: UStAE 19.1)"
+  }
+  input waived : bool {
+    label de "Verzicht auf die Anwendung erklärt"
+    label en "waiver declared"
+    source "§ 19 Abs. 2 UStG a. F."
+  }
+
+  constant limit_prev : money = 22_000 EUR {
+    label de "Umsatzgrenze Vorjahr"
+    label en "turnover limit, previous year"
+    source "§ 19 Abs. 1 Satz 1 UStG a. F."
+  }
+  constant limit_curr : money = 50_000 EUR {
+    label de "Umsatzgrenze laufendes Jahr (voraussichtlich)"
+    label en "turnover limit, current year (expected)"
+    source "§ 19 Abs. 1 Satz 1 UStG a. F."
+  }
+
+  rule within_limits : bool = turnover_prev <= limit_prev and turnover_curr <= limit_curr {
+    label de "Umsatzgrenzen eingehalten"
+    label en "turnover limits met"
+    source "§ 19 Abs. 1 Satz 1 UStG a. F."
+  }
+
+  rule exempt : bool {
+    label de "Umsatzsteuer wird nicht erhoben"
+    label en "VAT is not charged"
+    source "§ 19 Abs. 1 Satz 1 UStG a. F."
+    default resident and within_limits
+    unless waived then false {
+      source "§ 19 Abs. 2 UStG a. F."
+    }
+  }
+}
+
+norm small_business {
+  label de "Kleinunternehmer"
+  label en "Small business scheme"
+  source "§ 19 UStG in der ab 2025-01-01 geltenden Fassung"
+  valid from 2025-01-01
+  replaces small_business_2020
+
+  input resident : bool {
+    label de "im Inland ansässig"
+    label en "established in Germany"
+  }
+  input turnover_prev : money {
+    label de "Gesamtumsatz im vorangegangenen Kalenderjahr"
+    label en "total turnover in the previous calendar year"
+  }
+  input turnover_curr : money {
+    label de "Gesamtumsatz im laufenden Kalenderjahr"
+    label en "total turnover in the current calendar year"
+  }
+  input waived : bool {
+    label de "Verzicht auf die Steuerbefreiung erklärt"
+    label en "waiver of the exemption declared"
+    source "§ 19 Abs. 3 UStG"
+  }
+  input waiver_years : int {
+    label de "Kalenderjahre, für die der Verzicht schon gilt"
+    label en "calendar years the waiver has applied for"
+    source "§ 19 Abs. 3 Satz 3 UStG"
+  }
+
+  constant limit_prev : money = 25_000 EUR {
+    label de "Umsatzgrenze Vorjahr"
+    label en "turnover limit, previous year"
+    source "§ 19 Abs. 1 Satz 1 UStG"
+  }
+  constant limit_curr : money = 100_000 EUR {
+    label de "Umsatzgrenze laufendes Jahr"
+    label en "turnover limit, current year"
+    source "§ 19 Abs. 1 Satz 1 UStG"
+  }
+
+  rule within_limits : bool = turnover_prev <= limit_prev and turnover_curr <= limit_curr {
+    label de "Umsatzgrenzen eingehalten"
+    label en "turnover limits met"
+    source "§ 19 Abs. 1 Satz 1 UStG"
+  }
+
+  rule exempt : bool {
+    label de "Umsätze als Kleinunternehmer steuerfrei"
+    label en "turnover exempt under the small business scheme"
+    source "§ 19 Abs. 1 Satz 1 UStG"
+    default resident and within_limits
+    unless waived then false {
+      source "§ 19 Abs. 3 UStG"
+    }
+  }
+
+  // What § 19 para. 3 allows and forbids – rules of type bool that say whether they apply.
+  permission waive {
+    label de "darf auf die Steuerbefreiung verzichten"
+    label en "may waive the exemption"
+    source "§ 19 Abs. 3 Satz 1 UStG"
+    when resident and within_limits and not waived
+  }
+
+  prohibition revoke_early {
+    label de "darf den Verzicht noch nicht widerrufen"
+    label en "must not revoke the waiver yet"
+    source "§ 19 Abs. 3 Satz 3 UStG"
+    when waived and waiver_years < 5
+  }
+
+  permission revoke {
+    label de "darf den Verzicht widerrufen"
+    label en "may revoke the waiver"
+    source "§ 19 Abs. 3 Satz 4 UStG"
+    when waived and waiver_years >= 5
+  }
+}
+
+theorem waiver_excludes {
+  label de "Mit Verzicht keine Steuerfreiheit"
+  label en "A waiver ends the exemption"
+  params lean "(i : small_business.Inputs)"
+  statement lean "i.waived = true → small_business.exempt i = false"
+  proof lean "by intro h; simp [small_business.exempt, h]"
+}
+
+theorem lower_turnover_keeps_exemption {
+  label de "Weniger Umsatz kostet die Steuerfreiheit nie"
+  label en "Lower turnover never costs the exemption"
+  params lean "(i j : small_business.Inputs)"
+  statement lean "j.resident = i.resident → j.waived = i.waived → j.turnover_prev ≤ i.turnover_prev → j.turnover_curr ≤ i.turnover_curr → small_business.exempt i = true → small_business.exempt j = true"
+  proof lean ```
+    by
+      intro hr hw hp hc h
+      simp only [small_business.exempt, small_business.within_limits, hr, hw] at h ⊢
+      cases hv : i.waived <;> simp_all
+      exact ⟨h.2.1.trans' hp, h.2.2.trans' hc⟩
+  ```
+}
+
+example at_the_limits {
+  label de "Genau an den Grenzen: steuerfrei"
+  label en "Exactly at the limits: exempt"
+  statement lean "small_business.exempt { resident := true, turnover_prev := 25000, turnover_curr := 100000, waived := false, waiver_years := 0 } = true"
+  proof lean "by norm_num [small_business.exempt, small_business.within_limits, small_business.limit_prev, small_business.limit_curr]"
+}
+
+example one_euro_over {
+  label de "Ein Euro über der Vorjahresgrenze: nicht steuerfrei"
+  label en "One euro over last year's limit: not exempt"
+  statement lean "small_business.exempt { resident := true, turnover_prev := 25001, turnover_curr := 0, waived := false, waiver_years := 0 } = false"
+  proof lean "by norm_num [small_business.exempt, small_business.within_limits, small_business.limit_prev, small_business.limit_curr]"
+}
+
+theorem revocation_consistent {
+  label de "Widerruf ist nie zugleich erlaubt und verboten – und nach einem Verzicht immer eines von beiden"
+  label en "Revocation is never both permitted and forbidden – and after a waiver always one of them"
+  params lean "(i : small_business.Inputs)"
+  statement lean "¬ (small_business.revoke i = true ∧ small_business.revoke_early i = true) ∧ (i.waived = true → small_business.revoke i = true ∨ small_business.revoke_early i = true)"
+  proof lean ```
+    by
+      simp only [small_business.revoke, small_business.revoke_early]
+      cases i.waived <;> simp
+      exact le_or_gt 5 _
+  ```
+}
+
+theorem reform_keeps_exemption {
+  label de "Wer 2024 befreit war, ist es mit denselben Zahlen ab 2025 auch"
+  label en "Whoever was exempt in 2024 is, with the same figures, exempt from 2025 too"
+  params lean "(i : small_business_2020.Inputs) (j : small_business.Inputs)"
+  statement lean "j.resident = i.resident → j.waived = i.waived → j.turnover_prev = i.turnover_prev → j.turnover_curr = i.turnover_curr → small_business_2020.exempt i = true → small_business.exempt j = true"
+  proof lean ```
+    by
+      intro hr hw hp hc h
+      simp only [small_business_2020.exempt, small_business_2020.within_limits, small_business_2020.limit_prev, small_business_2020.limit_curr, small_business.exempt, small_business.within_limits, small_business.limit_prev, small_business.limit_curr, hr, hw, hp, hc] at h ⊢
+      cases hv : i.waived <;> simp_all
+      obtain ⟨-, h1, h2⟩ := h
+      exact ⟨by linarith [of_decide_eq_true h1], by linarith [of_decide_eq_true h2]⟩
+  ```
+}
+
+example between_the_old_and_new_limit {
+  label de "24.000 € im Vorjahr: bis 2024 nicht befreit, ab 2025 befreit"
+  label en "24,000 euros last year: not exempt until 2024, exempt from 2025"
+  statement lean "small_business_2020.exempt { resident := true, turnover_prev := 24000, turnover_curr := 30000, waived := false } = false ∧ small_business.exempt { resident := true, turnover_prev := 24000, turnover_curr := 30000, waived := false, waiver_years := 0 } = true"
+  proof lean "by norm_num [small_business_2020.exempt, small_business_2020.within_limits, small_business_2020.limit_prev, small_business_2020.limit_curr, small_business.exempt, small_business.within_limits, small_business.limit_prev, small_business.limit_curr]"
+}
+
+example new_year_2025 {
+  label de "Am 31.12.2024 gilt die alte Fassung, am 01.01.2025 die neue"
+  label en "On 2024-12-31 the old version applies, on 2025-01-01 the new one"
+  statement lean "small_business_2020.in_force (verkodo.day 2024 12 31) = true ∧ small_business.in_force (verkodo.day 2024 12 31) = false ∧ small_business_2020.in_force (verkodo.day 2025 1 1) = false ∧ small_business.in_force (verkodo.day 2025 1 1) = true"
+  proof lean "by decide"
+}
+
+path guide {
+  label de "Leitfaden: Bin ich Kleinunternehmer?"
+  label en "Guide: does the small business scheme apply to me?"
+  step small_business.resident
+  step small_business.turnover_prev
+  step small_business.turnover_curr
+  step small_business.limit_prev
+  step small_business.limit_curr
+  step small_business.within_limits
+  step small_business.waived
+  step small_business.exempt
+  step at_the_limits
+  step one_euro_over
+  step waiver_excludes
+  step lower_turnover_keeps_exemption
+  step small_business.waiver_years
+  step small_business.waive
+  step small_business.revoke_early
+  step small_business.revoke
+  step revocation_consistent
+}
+
+path reform_2025 {
+  label de "Was sich 2025 für Kleinunternehmer geändert hat"
+  label en "What changed for small businesses in 2025"
+  step small_business_2020
+  step small_business
+  step new_year_2025
+  step between_the_old_and_new_limit
+  step reform_keeps_exemption
+}

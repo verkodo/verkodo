@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+# For the web editor (crates/verkodo-wasm).
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

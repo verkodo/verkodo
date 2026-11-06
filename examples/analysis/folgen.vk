@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: CC-BY-4.0
+//
+// Analysis I, sequences – a small slice to try the language. Formulas are Lean 4 (Mathlib); `verkodo prove`
+// lets Lean check definitions, bridges and proofs, and carries theorems over to the variants each path chose.
+
+module analysis.folgen original de, en
+
+concept converges {
+  label de "konvergiert gegen"
+  label en "converges to"
+  params lean "(a : ℕ → ℝ) (L : ℝ)"
+
+  variant eps_n {
+    label de "ε-N-Definition"
+    label en "ε-N definition"
+    lean "∀ ε > 0, ∃ N : ℕ, ∀ n ≥ N, |a n - L| < ε"
+  }
+
+  variant filter {
+    label de "über Umgebungsfilter"
+    label en "via neighbourhood filters"
+    lean "Filter.Tendsto a Filter.atTop (nhds L)"
+  }
+
+  variant metric {
+    label de "über den Abstand im metrischen Raum"
+    label en "via the distance in a metric space"
+    lean "∀ ε > 0, ∃ N : ℕ, ∀ n ≥ N, dist (a n) L < ε"
+  }
+
+  bridge eps_n <-> filter {
+    proof lean "by rw [Metric.tendsto_atTop]; simp only [Real.dist_eq]"
+  }
+
+  // No bridge eps_n <-> metric: theorems are carried over through the filter variant.
+  bridge filter <-> metric {
+    proof lean "Metric.tendsto_atTop"
+  }
+}
+
+// A concept may define an object rather than a statement: it has a type, and its bridges are equalities.
+concept distance {
+  label de "Abstand"
+  label en "distance"
+  params lean "(x y : ℝ)"
+  type lean "ℝ"
+
+  variant absolute {
+    label de "über den Betrag"
+    label en "via the absolute value"
+    lean "|x - y|"
+  }
+
+  variant root {
+    label de "über die Quadratwurzel"
+    label en "via the square root"
+    lean "Real.sqrt ((x - y) ^ 2)"
+  }
+
+  bridge absolute = root {
+    proof lean "(Real.sqrt_sq_eq_abs (x - y)).symm"
+  }
+}
+
+theorem distance_symm {
+  label de "Der Abstand ist symmetrisch"
+  label en "Distance is symmetric"
+  params lean "(x y : ℝ)"
+  statement lean "distance x y = distance y x"
+  proof lean "abs_sub_comm x y"
+}
+
+concept bounded {
+  label de "beschränkt"
+  label en "bounded"
+  params lean "(a : ℕ → ℝ)"
+
+  variant abs {
+    label de "über den Betrag"
+    label en "via the absolute value"
+    lean "∃ C : ℝ, ∀ n, |a n| ≤ C"
+  }
+}
+
+example const_converges {
+  label de "Konstante Folgen konvergieren"
+  label en "Constant sequences converge"
+  params lean "(c : ℝ)"
+  statement lean "converges (fun _ => c) c"
+  proof lean ```
+    by
+      intro ε hε
+      exact ⟨0, fun n _ => by simpa using hε⟩
+  ```
+}
+
+theorem limit_unique {
+  label de "Eindeutigkeit des Grenzwerts"
+  label en "Uniqueness of limits"
+  params lean "(a : ℕ → ℝ) (L M : ℝ)"
+  using converges.filter
+  statement lean "converges a L → converges a M → L = M"
+  proof lean "fun h₁ h₂ => tendsto_nhds_unique h₁ h₂"
+}
+
+remark limit_notation {
+  label de "Schreibweise"
+  label en "Notation"
+  about limit_unique
+  text de "Weil der Grenzwert eindeutig ist, darf man von dem Grenzwert sprechen und lim a schreiben."
+  text en "Because the limit is unique, one may speak of the limit and write lim a."
+}
+
+theorem convergent_bounded {
+  label de "Konvergente Folgen sind beschränkt"
+  label en "Convergent sequences are bounded"
+  params lean "(a : ℕ → ℝ) (L : ℝ)"
+  statement lean "converges a L → bounded a"
+}
+
+path analysis1 {
+  label de "Analysis I – Folgen (ε-N-Zugang)"
+  label en "Analysis I – sequences (ε-N approach)"
+  step converges.eps_n
+  step const_converges
+  step limit_unique
+  step limit_notation
+  step bounded
+  step convergent_bounded
+  step distance.absolute
+  step distance_symm
+}
+
+path analysis1_filter {
+  label de "Analysis I – Folgen (Filter-Zugang)"
+  label en "Analysis I – sequences (filter approach)"
+  step converges.filter
+  step limit_unique
+  step converges.eps_n
+  step const_converges
+}
+
+path analysis1_metric {
+  label de "Analysis I – Folgen (metrischer Zugang)"
+  label en "Analysis I – sequences (metric approach)"
+  step converges.metric
+  step const_converges
+  step limit_unique
+  step distance.root
+  step distance_symm
+}

@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The verkodo documentation – at https://verkodo.github.io/verkodo/ until verkodo.dev points here (then `url`
+# https://verkodo.dev and no `baseurl`) –, built from this folder with Jekyll and the remote theme Just the Docs
+# by .github/workflows/pages.yml (GitHub Actions, not a branch). The files in assets/ are copies from verkodo/brand.
+title: verkodo
+description: Truth code – mathematics and law written formally, checked by machine – documentation
+url: https://verkodo.github.io
+baseurl: /verkodo
+lang: en
+
+remote_theme: just-the-docs/just-the-docs@v0.10.0
+plugins:
+  - jekyll-remote-theme
+
+color_scheme: verkodo
+logo: /assets/verkodo-lockup-on-dark.svg
+favicon_ico: /assets/favicon.ico
+search_enabled: true
+heading_anchors: true
+back_to_top: true
+back_to_top_text: Back to top
+
+aux_links:
+  verkodo: https://verkodo.github.io/website/
+  GitHub: https://github.com/verkodo/verkodo
+aux_links_new_tab: true
+
+gh_edit_link: true
+gh_edit_link_text: Edit this page on GitHub
+gh_edit_repository: https://github.com/verkodo/verkodo
+gh_edit_branch: main
+gh_edit_source: docs
+gh_edit_view_mode: edit
+
+footer_content: "verkodo is free software under AGPL-3.0-or-later – a <a href=\"https://falkoss.org\">falkOSS</a> project. <a href=\"https://falkoss.org/impressum.html\">Imprint</a> · <a href=\"https://falkoss.org/datenschutz.html\">Privacy</a>"
+
+# Every page uses the theme's layout (GitHub Pages would default to it as well; a local build does not)
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

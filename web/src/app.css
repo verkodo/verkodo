@@ -1,0 +1,160 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* The colours of verkodo/brand (titanium grey beside the face); system fonts only – nothing is loaded from elsewhere. */
+:root {
+  --night: #0D1117;
+  --panel: #12171E;
+  --line: #1C232B;
+  --paper: #E6EDF3;
+  --ink: #14202B;
+  --accent: #646A70;
+  --bg: #ffffff;
+  --fg: var(--ink);
+  --border: #d0d7de;
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  /* The editor's highlighting. */
+  --vk-keyword: #5b3fa0;
+  --vk-type: #1f6f8b;
+  --vk-string: #8a4b14;
+  --vk-formula: #1e6b3a;
+  --vk-number: #b0306a;
+  --vk-definition: #14202b;
+  --vk-active: #f2f4f6;
+  --vk-selection: #cfe0f5;
+  --surface: #f6f8fa;
+  --bad: #c4402f;
+  --good: #1e6b3a;
+}
+
+/* Dark: as the system says, unless the editor's theme says otherwise (data-theme on <html>). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #8F959B;
+    --bg: var(--night);
+    --fg: var(--paper);
+    --border: var(--line);
+    --surface: var(--panel);
+    --vk-keyword: #c3a6ff;
+    --vk-type: #7fc8e0;
+    --vk-string: #e6b07a;
+    --vk-formula: #8fd4a6;
+    --vk-number: #f29ac0;
+    --vk-definition: #ffffff;
+    --vk-active: #161c24;
+    --vk-selection: #2a3a52;
+    --bad: #ef9a8f;
+    --good: #8fd4a6;
+  }
+}
+
+:root[data-theme="dark"] {
+  --accent: #8F959B;
+  --bg: var(--night);
+  --fg: var(--paper);
+  --border: var(--line);
+  --surface: var(--panel);
+  --vk-keyword: #c3a6ff;
+  --vk-type: #7fc8e0;
+  --vk-string: #e6b07a;
+  --vk-formula: #8fd4a6;
+  --vk-number: #f29ac0;
+  --vk-definition: #ffffff;
+  --vk-active: #161c24;
+  --vk-selection: #2a3a52;
+  --bad: #ef9a8f;
+  --good: #8fd4a6;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+main {
+  max-width: 40rem;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}
+
+a,
+button {
+  color: var(--accent);
+}
+
+input,
+button {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+}
+
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.error {
+  color: #d1242f;
+}
+
+/* Hover cards in the editor: the cards of verkodo's renderer. */
+.vk-card {
+  max-width: 34rem;
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.vk-card .kind {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.vk-card .title {
+  font-weight: 600;
+}
+.vk-card .id,
+.vk-card code,
+.vk-card .lean {
+  font: 0.8rem ui-monospace, "SF Mono", Menlo, monospace;
+}
+.vk-card .id,
+.vk-card .key,
+.vk-card .src,
+.vk-card .status,
+.vk-card .hint {
+  color: var(--accent);
+}
+.vk-card .lean {
+  white-space: pre-wrap;
+}
+.vk-card .row {
+  margin: 0.2rem 0;
+}
+.vk-card .key {
+  margin-right: 0.35rem;
+}
+.vk-card .open {
+  color: #c4402f;
+}
+.vk-card a {
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+}

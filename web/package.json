@@ -1,0 +1,36 @@
+{
+  "name": "verkodo-web",
+  "private": true,
+  "version": "0.0.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "packageManager": "pnpm@12.13.0",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "api": "openapi-typescript ../api/openapi.json -o src/lib/api-types.ts",
+    "wasm": "cargo build --locked -p verkodo-wasm --target wasm32-unknown-unknown --release && cp ../target/wasm32-unknown-unknown/release/verkodo_wasm.wasm src/lib/verkodo.wasm",
+    "dev": "vite",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tsconfig/svelte": "5.0.8",
+    "openapi-typescript": "7.13.0",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.3.4"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5",
+    "openapi-fetch": "0.17.0"
+  }
+}

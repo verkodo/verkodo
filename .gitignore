@@ -1,0 +1,13 @@
+.DS_Store
+/target
+
+# The web app: its packages and its build, which the binary embeds and CI builds.
+/web/node_modules
+/crates/verkodo-web/web
+/web/src/lib/verkodo.wasm
+
+# Lean: Mathlib and its build (`lake exe cache get` in lean/), the files `verkodo prove` generates; HTML from
+# `verkodo render`.
+/lean/.lake
+/lean/generated
+/out

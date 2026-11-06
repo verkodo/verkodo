@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "verkodo-web"
+description = "The web editor of verkodo, built in: served with a Content-Security-Policy, a nonce new with every page"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["verkodo","web-editor","editor","webassembly"]
+categories = ["web-programming::http-server"]
+# The web editor, built by `pnpm build` in web/ (ignored by git), is part of the crate.
+include = ["src/**/*.rs", "web/**/*"]
+
+[dependencies]
+axum.workspace = true
+getrandom.workspace = true
+rust-embed.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tokio.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true
