@@ -232,6 +232,44 @@ a.tile:hover { border-color: var(--titan); }
 .finished { display: none; text-align: center; padding: 22px; color: var(--muted); }
 .finished.show { display: block; }
 
+/* versions of a provision */
+.versions { margin-top: 12px; font: 13px var(--sans); }
+.versions > ol { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 0; }
+.versions > ol > li { position: relative; padding: 0 22px 0 16px; display: flex; flex-direction: column; gap: 2px; }
+.versions > ol > li::before { content: ""; position: absolute; left: 0; top: 7px; width: 9px; height: 9px;
+  border-radius: 50%; border: 2px solid var(--titan); background: var(--panel); }
+.versions > ol > li:not(:last-child)::after { content: ""; position: absolute; left: 11px; right: 4px; top: 11px;
+  border-top: 2px solid var(--line); }
+.versions > ol > li.here::before { background: var(--titan); }
+.versions > ol > li a { position: relative; z-index: 1; background: var(--panel); padding-right: 6px; }
+.versions .when { color: var(--faint); font-size: 12px; }
+.versions .now-tag { display: none; color: var(--ok); font-size: 12px; font-weight: 600; }
+.versions > ol > li.now .now-tag { display: inline; }
+.versions .diff { margin-top: 8px; }
+.versions .diff ul { list-style: none; padding: 0; margin: 6px 0 0; font: 14px var(--serif); }
+.versions .diff li { padding: 3px 0; }
+
+/* context: a module among the others */
+.hood { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin-bottom: 24px; }
+.hood .tier { display: flex; flex-direction: column; gap: 4px; }
+.hood .wire { text-align: center; color: var(--faint); line-height: 1; }
+.node { display: block; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  text-decoration: none; color: var(--text); font: 13px/1.3 var(--sans); }
+a.node:hover { border-color: var(--titan); }
+.node.here { border-color: var(--titan); font-weight: 600; }
+
+/* the map of the knowledge */
+.map { position: relative; display: grid; grid-template-columns: repeat(var(--cols), minmax(180px, 1fr));
+  gap: 18px 48px; margin: 12px 0 28px; overflow-x: auto; padding: 4px; }
+.map .col { display: flex; flex-direction: column; gap: 12px; justify-content: center; position: relative; z-index: 1; }
+.map .node { font-size: 14px; padding: 8px 12px; }
+.map .node .area { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--faint); margin-bottom: 2px; }
+.map .node.lit { border-color: var(--titan); box-shadow: 0 0 0 1px var(--titan); }
+.map .wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+.map .wires path { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.map .wires path.lit { stroke: var(--titan); stroke-width: 2; }
+
 /* the calculator */
 .calc { margin-top: 14px; }
 .calc .panel { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); }
@@ -606,6 +644,51 @@ pub const JS: &str = r#"
       box.querySelector('button').addEventListener('click', () => openCalc(box), { once: true });
     });
   }
+
+  // versions: the one in force today
+  const today = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('.versions li[data-from]').forEach((li) => {
+    const from = li.dataset.from, to = li.dataset.to;
+    if ((!from || from <= today) && (!to || today <= to)) li.classList.add('now');
+  });
+
+  // the map: lines from what a module builds on to the module; hovering one lights its own
+  document.querySelectorAll('.map').forEach((map) => {
+    const svg = map.querySelector('.wires');
+    const nodes = new Map([...map.querySelectorAll('.node[data-node]')].map((n) => [n.dataset.node, n]));
+    const draw = () => {
+      const box = map.getBoundingClientRect();
+      svg.innerHTML = '';
+      nodes.forEach((n) => {
+        for (const u of (n.dataset.uses || '').split(' ').filter(Boolean)) {
+          const from = nodes.get(u); if (!from) continue;
+          const a = from.getBoundingClientRect(), b = n.getBoundingClientRect();
+          const x1 = a.right - box.left + map.scrollLeft, y1 = a.top + a.height / 2 - box.top;
+          const x2 = b.left - box.left + map.scrollLeft, y2 = b.top + b.height / 2 - box.top;
+          const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          const dx = Math.max(24, (x2 - x1) / 2);
+          p.setAttribute('d', `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`);
+          p.dataset.from = u; p.dataset.to = n.dataset.node;
+          svg.appendChild(p);
+        }
+      });
+    };
+    const light = (id, on) => {
+      svg.querySelectorAll('path').forEach((p) => {
+        const hit = on && (p.dataset.from === id || p.dataset.to === id);
+        p.classList.toggle('lit', hit);
+        if (hit) { nodes.get(p.dataset.from).classList.add('lit'); nodes.get(p.dataset.to).classList.add('lit'); }
+      });
+      if (!on) nodes.forEach((n) => n.classList.remove('lit'));
+    };
+    nodes.forEach((n, id) => {
+      n.addEventListener('mouseenter', () => light(id, true));
+      n.addEventListener('mouseleave', () => light(id, false));
+    });
+    draw();
+    window.addEventListener('resize', draw);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  });
 
   const resume = document.getElementById('resume');
   if (resume) {

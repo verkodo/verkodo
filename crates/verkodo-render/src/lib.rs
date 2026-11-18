@@ -265,6 +265,11 @@ impl R<'_> {
             "applied" => ("greift", "applies"),
             "rule_default" => ("Grundsatz", "as a rule"),
             "close" => ("Schließen", "Close"),
+            "versions" => ("Fassungen", "Versions"),
+            "in_force" => ("gilt heute", "in force today"),
+            "changed_against" => ("Geändert gegenüber", "Changed against"),
+            "context" => ("Zusammenhang", "Context"),
+            "map" => ("Wissenslandkarte", "Map of the knowledge"),
             _ => ("?", "?"),
         };
         if self.lang == "de" { de } else { en }

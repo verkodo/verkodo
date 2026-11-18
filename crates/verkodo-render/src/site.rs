@@ -26,6 +26,8 @@ pub(crate) struct Layout {
     used_by: Vec<BTreeSet<usize>>,
     /// For every symbol, where a link to it leads.
     pub(crate) hrefs: Vec<String>,
+    /// For every module, the modules it builds on.
+    module_uses: Vec<BTreeSet<usize>>,
 }
 
 pub(crate) struct Module {
@@ -114,10 +116,11 @@ impl Layout {
                 .filter(|&s| a.symbols[s].loc.file() == file && a.symbols[s].kind == SymKind::Path)
                 .collect();
             let label = |s: usize| a.label(ws, s, lang);
-            // the main declaration: the norm in force with the most parts, else a path, a concept, anything
+            // the main declaration: the current norm with the most parts (one with a date of validity first), else a path,
+            // a concept, anything
             let members = |s: usize| match a.symbols[s].loc {
                 Loc::Item { file, item } => match &ws.asts[file].items[item] {
-                    Item::Norm(n) if n.valid_from.is_some() && !a.replaced_by.contains_key(&s) => Some(n.members.len()),
+                    Item::Norm(n) if !a.replaced_by.contains_key(&s) => Some((n.valid_from.is_some(), n.members.len())),
                     _ => None,
                 },
                 _ => None,
@@ -173,7 +176,19 @@ impl Layout {
                 }
             })
             .collect();
-        Layout { modules, module_of_file, uses, used_by, hrefs }
+        let mut module_uses = vec![BTreeSet::new(); modules.len()];
+        for (s, targets) in uses.iter().enumerate() {
+            let from = module_of_file.get(a.symbols[s].loc.file()).copied().flatten();
+            for &t in targets {
+                let to = module_of_file.get(a.symbols[t].loc.file()).copied().flatten();
+                if let (Some(f), Some(t)) = (from, to)
+                    && f != t
+                {
+                    module_uses[f].insert(t);
+                }
+            }
+        }
+        Layout { modules, module_of_file, uses, used_by, hrefs, module_uses }
     }
 
     fn module_of(&self, a: &Analysis, sym: usize) -> Option<&Module> {
@@ -605,6 +620,9 @@ impl<'a> R<'a> {
             main.push_str("</ul></div>");
         }
         main.push_str("</div>");
+        if l.module_uses.iter().any(|u| !u.is_empty()) {
+            let _ = write!(main, r#"<p class="section-title">{}</p>{}"#, esc(self.w("map")), self.map(l, inline));
+        }
         let _ = write!(main, r#"<p class="hint">{}</p>"#, esc(self.w("hint")));
         if inline {
             for m in &l.modules {
@@ -703,7 +721,8 @@ impl<'a> R<'a> {
                 title = esc(&self.title(s)),
                 body = self.body_with(s, true),
                 calc = if self.a.symbols[s].kind == SymKind::Norm {
-                    format!(r#"<div class="calc" data-norm="{}" hidden></div>"#, esc(&self.a.symbols[s].id))
+                    self.versions(s)
+                        + &format!(r#"<div class="calc" data-norm="{}" hidden></div>"#, esc(&self.a.symbols[s].id))
                 } else {
                     String::new()
                 },
@@ -715,6 +734,190 @@ impl<'a> R<'a> {
         main
     }
 
+    /// The versions of a provision as a time line – the one shown marked, the one in force today found by the script –
+    /// and what changed against the version before: parts added, dropped, or written differently.
+    fn versions(&self, norm: usize) -> String {
+        let chain = self.a.versions(norm);
+        if chain.len() < 2 {
+            return String::new();
+        }
+        let norm_of = |v: usize| match self.a.symbols[v].loc {
+            Loc::Item { file, item } => match &self.ws.asts[file].items[item] {
+                Item::Norm(n) => Some((file, n)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let mut out = format!(r#"<div class="versions"><span class="key">{}</span><ol>"#, esc(self.w("versions")));
+        for &v in &chain {
+            let Some((_, n)) = norm_of(v) else { continue };
+            let from = n.valid_from.as_ref().map(|(d, _)| d.as_str()).unwrap_or_default();
+            let to = n.valid_to.as_ref().map(|(d, _)| d.as_str()).unwrap_or_default();
+            let span = match (from.is_empty(), to.is_empty()) {
+                (false, false) => format!("{from} – {to}"),
+                (false, true) => format!("{} {from}", self.w("valid_from")),
+                _ => String::new(),
+            };
+            let _ = write!(
+                out,
+                r#"<li class="{here}" data-from="{from}" data-to="{to}"><a href="{href}" data-ref="{id}">{label}</a><span class="when">{span}</span><span class="now-tag">{now}</span></li>"#,
+                here = if v == norm { "here" } else { "" },
+                href = esc(&self.f_href(v)),
+                id = esc(&self.a.symbols[v].id),
+                label = esc(&self.label(v)),
+                span = esc(&span),
+                now = esc(self.w("in_force")),
+            );
+        }
+        out.push_str("</ol>");
+        // what changed against the version before this one
+        if let (Some(&old), Some((nf, new))) = (self.a.replaces.get(&norm), norm_of(norm))
+            && let Some((of, oldn)) = norm_of(old)
+        {
+            let text = |file: usize, span: verkodo_syntax::Span| -> String {
+                let t = &self.ws.files[file].text;
+                t.get(span.start..span.end).unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ")
+            };
+            let what = |file: usize, m: &verkodo_syntax::ast::Member| -> String {
+                use verkodo_syntax::ast::MemberKind;
+                match &m.kind {
+                    MemberKind::Constant(e) => text(file, e.span),
+                    MemberKind::Rule { default, unless } => {
+                        let mut s = default.as_ref().map(|e| text(file, e.span)).unwrap_or_default();
+                        for u in unless {
+                            s.push_str(" | ");
+                            s.push_str(&text(file, u.span));
+                        }
+                        s
+                    }
+                    _ => text(file, m.ty.name.span),
+                }
+            };
+            let id_of =
+                |norm: usize, name: &str| self.a.by_id.get(&format!("{}.{name}", self.a.symbols[norm].id)).copied();
+            let mut rows = Vec::new();
+            for m in &new.members {
+                let label = id_of(norm, &m.name.text).map(|s| self.label(s)).unwrap_or_else(|| m.name.text.clone());
+                match oldn.members.iter().find(|o| o.name.text == m.name.text) {
+                    None => rows.push(format!(r#"<li><span class="chip ok">+</span> {}</li>"#, esc(&label))),
+                    Some(o) if what(of, o) != what(nf, m) => {
+                        let value = |file: usize, mm: &verkodo_syntax::ast::Member| match &mm.kind {
+                            verkodo_syntax::ast::MemberKind::Constant(e) => Some(self.expr(file, e)),
+                            _ => None,
+                        };
+                        let change = match (value(of, o), value(nf, m)) {
+                            (Some(a), Some(b)) => format!(": {a} → {b}"),
+                            _ => String::new(),
+                        };
+                        rows.push(format!(r#"<li><span class="chip">≠</span> {}{change}</li>"#, esc(&label)));
+                    }
+                    Some(_) => {}
+                }
+            }
+            for o in &oldn.members {
+                if !new.members.iter().any(|m| m.name.text == o.name.text) {
+                    let label = id_of(old, &o.name.text).map(|s| self.label(s)).unwrap_or_else(|| o.name.text.clone());
+                    rows.push(format!(r#"<li><span class="chip open">−</span> {}</li>"#, esc(&label)));
+                }
+            }
+            if !rows.is_empty() {
+                let _ = write!(
+                    out,
+                    r#"<details class="diff"><summary>{} {}</summary><ul>{}</ul></details>"#,
+                    esc(self.w("changed_against")),
+                    esc(&self.label(old)),
+                    rows.join("")
+                );
+            }
+        }
+        out.push_str("</div>");
+        out
+    }
+
+    /// Where a link to a symbol leads, as the format writes it.
+    fn f_href(&self, sym: usize) -> String {
+        let link = self.f.sym(sym, &self.a.symbols[sym].id, "");
+        link.split("href=\"")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+            .map(|h| h.replace("&amp;", "&"))
+            .unwrap_or_default()
+    }
+
+    /// A module among the others: what it builds on above, what builds on it below.
+    fn neighbours(&self, l: &Layout, m: usize) -> String {
+        let up: Vec<usize> = l.module_uses[m].iter().copied().collect();
+        let down: Vec<usize> = (0..l.modules.len()).filter(|&o| l.module_uses[o].contains(&m)).collect();
+        if up.is_empty() && down.is_empty() {
+            return String::new();
+        }
+        let link = |i: usize| {
+            format!(r#"<a class="node" href="{}.html">{}</a>"#, esc(&l.modules[i].id), esc(&l.modules[i].title))
+        };
+        let mut out = format!(r#"<h4>{}</h4><div class="hood">"#, esc(self.w("context")));
+        if !up.is_empty() {
+            let _ = write!(
+                out,
+                r#"<div class="tier">{}</div><div class="wire">↓</div>"#,
+                up.into_iter().map(link).collect::<String>()
+            );
+        }
+        let _ = write!(out, r#"<div class="tier"><span class="node here">{}</span></div>"#, esc(&l.modules[m].title));
+        if !down.is_empty() {
+            let _ = write!(
+                out,
+                r#"<div class="wire">↓</div><div class="tier">{}</div>"#,
+                down.into_iter().map(link).collect::<String>()
+            );
+        }
+        out.push_str("</div>");
+        out
+    }
+
+    /// Every module in columns by how deep it builds on others – the foundations left – with lines drawn by the
+    /// script from what each builds on.
+    fn map(&self, l: &Layout, inline: bool) -> String {
+        let n = l.modules.len();
+        let mut depth = vec![0usize; n];
+        for _ in 0..n {
+            let mut changed = false;
+            for i in 0..n {
+                let d = l.module_uses[i].iter().map(|&u| depth[u] + 1).max().unwrap_or(0);
+                if d > depth[i] && d < n {
+                    depth[i] = d;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let cols = depth.iter().copied().max().unwrap_or(0) + 1;
+        let mut out = format!(r#"<div class="map" style="--cols:{cols}"><svg class="wires" aria-hidden="true"></svg>"#);
+        for c in 0..cols {
+            out.push_str(r#"<div class="col">"#);
+            let mut in_col: Vec<usize> = (0..n).filter(|&i| depth[i] == c).collect();
+            in_col
+                .sort_by(|&a, &b| (&l.modules[a].area, &l.modules[a].id).cmp(&(&l.modules[b].area, &l.modules[b].id)));
+            for i in in_col {
+                let m = &l.modules[i];
+                let href = if inline { format!("#m-{}", m.id) } else { format!("{}.html", m.id) };
+                let to: Vec<String> = l.module_uses[i].iter().map(|u| u.to_string()).collect();
+                let _ = write!(
+                    out,
+                    r#"<a class="node" href="{}" data-node="{i}" data-uses="{}"><span class="area">{}</span>{}</a>"#,
+                    esc(&href),
+                    to.join(" "),
+                    esc(&self.area_name(&m.area)),
+                    esc(&m.title)
+                );
+            }
+            out.push_str("</div>");
+        }
+        out.push_str("</div>");
+        out
+    }
+
     pub(crate) fn article(&self, l: &Layout, m: &Module, site_title: &str) -> String {
         let main = self.article_main(l, m, false);
         let mut rail = format!(r#"<h4>{}</h4><ol class="toc">"#, esc(self.w("on_page")));
@@ -722,6 +925,9 @@ impl<'a> R<'a> {
             let _ = write!(rail, r##"<li><a href="#{}">{}</a></li>"##, esc(&self.a.symbols[s].id), esc(&self.title(s)));
         }
         rail.push_str("</ol>");
+        if let Some(i) = l.modules.iter().position(|x| x.id == m.id) {
+            rail.push_str(&self.neighbours(l, i));
+        }
         let used: BTreeSet<usize> = m
             .items
             .iter()
@@ -884,6 +1090,10 @@ mod tests {
         let sources = std::fs::read_to_string(dir.join("assets/sources.js")).unwrap();
         assert!(sources.contains(r#""path":"0.vk""#) && !sources.contains("p1.vk"), "{sources}");
         assert!(article.contains(r#"class="calc" data-norm="law.act.p1.tax""#));
+        // the map: § 2 builds on § 1; the article of § 1 shows § 2 below it
+        let home = std::fs::read_to_string(dir.join("index.html")).unwrap();
+        assert!(home.contains(r#"data-node="1" data-uses="0""#), "{home}");
+        assert!(article.contains(r#"class="hood""#) && article.contains(r#"<a class="node" href="law.act.p2.html">"#));
         std::fs::remove_dir_all(&dir).unwrap();
         let single = crate::index_html(&ws, &a, None, "en");
         assert_eq!(single.matches("<style").count(), 1);
