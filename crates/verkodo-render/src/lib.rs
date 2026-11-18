@@ -68,7 +68,7 @@ pub fn write_site(
     }
     put(assets_dir.join("site.css"), format!("{}{}", assets::font_faces("fonts/"), assets::CSS).as_bytes())?;
     put(assets_dir.join("site.js"), assets::JS.as_bytes())?;
-    put(assets_dir.join("data.js"), r.data_js(&layout, wasm.is_some()).as_bytes())?;
+    put(assets_dir.join("data.js"), format!("window.VK={};", r.data_json(&layout, wasm.is_some())).as_bytes())?;
     if let Some(wasm) = wasm {
         put(assets_dir.join("verkodo.wasm"), wasm)?;
         put(assets_dir.join("sources.js"), r.sources_js().as_bytes())?;

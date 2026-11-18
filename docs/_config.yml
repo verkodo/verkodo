@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The verkodo documentation – at https://verkodo.github.io/verkodo/ until verkodo.dev points here (then `url`
-# https://verkodo.dev and no `baseurl`) –, built from this folder with Jekyll and the remote theme Just the Docs
+# The verkodo documentation at https://verkodo.dev, built from this folder with Jekyll and the remote theme Just the Docs
 # by .github/workflows/pages.yml (GitHub Actions, not a branch). The files in assets/ are copies from verkodo/brand.
 title: verkodo
 description: Truth code – mathematics and law written formally, checked by machine – documentation
-url: https://verkodo.github.io
-baseurl: /verkodo
+url: https://verkodo.dev
 lang: en
 
 remote_theme: just-the-docs/just-the-docs@v0.10.0
@@ -21,7 +19,8 @@ back_to_top: true
 back_to_top_text: Back to top
 
 aux_links:
-  verkodo: https://verkodo.github.io/website/
+  verkodo: https://verkodo.org/
+  Knowledge (sciaro): https://sciaro.verkodo.org/
   GitHub: https://github.com/verkodo/verkodo
 aux_links_new_tab: true
 

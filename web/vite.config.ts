@@ -4,7 +4,7 @@
 // /api on to a `verkodo serve` running on the usual port. The editor bundles the examples from ../examples and the
 // WebAssembly module from `pnpm wasm` (src/lib/verkodo.wasm).
 //
-// `pnpm build:pages` builds it for a static host instead (GitHub Pages, below /verkodo/editor/; another path with
+// `pnpm build:pages` builds it for a static host instead (GitHub Pages at verkodo.dev, below /editor/; another path with
 // `pnpm build:pages --base /path/`) into dist-pages/: no server, so no API and no Lean, and the Content-Security-Policy comes as a
 // <meta> element. Without a server there is no nonce: scripts stay as strict as with `verkodo serve` – the preview's
 // script is a fixed text of verkodo-render, hashed here – but styles are allowed inline, since CodeMirror adds its
@@ -42,7 +42,7 @@ export default defineConfig(({ mode }) =>
   mode === "pages"
     ? {
         plugins: [svelte(), staticPolicy()],
-        base: "/verkodo/editor/",
+        base: "/editor/",
         build: { outDir: "dist-pages", emptyOutDir: true, assetsInlineLimit: 0 },
       }
     : {

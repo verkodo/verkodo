@@ -9,7 +9,7 @@ proofs and writes HTML pages in which every term explains itself on hover. Versi
 The idea and the plan are in the [whitepaper](https://github.com/verkodo/whitepaper). The knowledge itself –
 mathematics and law, sourced and checked – grows in [verkodo/sciaro](https://github.com/verkodo/sciaro) (Esperanto
 for a body of knowledge); [examples/](examples/) here only shows the language.
-The documentation is at [verkodo.github.io/verkodo](https://verkodo.github.io/verkodo/) (later verkodo.dev).
+The documentation is at [verkodo.dev](https://verkodo.dev/), the web editor at [verkodo.dev/editor](https://verkodo.dev/editor/).
 
 | Path | What |
 |---|---|

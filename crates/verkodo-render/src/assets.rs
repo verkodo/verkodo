@@ -337,12 +337,16 @@ a.node:hover { border-color: var(--titan); }
 }
 "#;
 
-/// The page's behaviour, all optional – without it the pages are plain linked HTML. Reads `window.VK`: `cards` (id →
-/// card markup), `search` (entries [id, label, kind, url, where]) and `words`. Progress and the theme stay in this
+/// The page's behaviour, all optional – without it the pages are plain linked HTML. Reads `window.VK` (a site's
+/// `assets/data.js`) or the JSON in `#vk-data` (a single page): `cards` (id → card markup), `search` (entries [id,
+/// label, kind, url, where]), `forms`, `calc` and `words`. A fixed text: the static web editor allows it by its hash. Progress and the theme stay in this
 /// browser (localStorage); nothing leaves it.
 pub const JS: &str = r#"
 (() => {
-  const VK = window.VK || { cards: {}, search: [], words: {} };
+  const VK = window.VK || (() => {
+    const d = document.getElementById('vk-data');
+    try { return d ? JSON.parse(d.textContent) : null; } catch (e) { return null; }
+  })() || { cards: {}, search: [], words: {} };
   const W = (k) => (VK.words && VK.words[k]) || k;
   const store = {
     get(k, d) { try { const v = localStorage.getItem('verkodo:' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },

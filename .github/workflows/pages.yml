@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The site at verkodo.github.io/verkodo (later verkodo.dev): docs/ built with Jekyll as GitHub Pages builds it (remote
+# The site at verkodo.dev: docs/ built with Jekyll as GitHub Pages builds it (remote
 # theme Just the Docs), and the web editor below /editor/ – static, verkodo as WebAssembly, no Lean (`pnpm
 # build:pages`). Published with GitHub Actions on every change on main; on a pull request only built. Like
 # falkoss/starterpack's pages-jekyll.yml, with the editor added. Actions are pinned by commit, with the version as a
@@ -47,7 +47,7 @@ jobs:
           node-version: 26
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - name: The web editor, below /verkodo/editor/
+      - name: The web editor, below /editor/
         working-directory: web
         run: |
           pnpm install --frozen-lockfile

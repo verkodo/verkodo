@@ -362,33 +362,38 @@ impl<'a> R<'a> {
         format!("window.VK_SOURCES={{\"lang\":\"{}\",\"files\":[{}]}};", json_esc(self.lang), files.join(","))
     }
 
-    /// `window.VK`: the cards, the search, the norms to try (`calc`: whether the calculator is there) and the words
-    /// of the script.
-    pub(crate) fn data_js(&self, l: &Layout, calc: bool) -> String {
-        let mut out = String::from("window.VK={cards:{");
-        for s in 0..self.a.symbols.len() {
-            let _ = write!(out, "\"{}\":\"{}\",", json_esc(&self.a.symbols[s].id), json_esc(&self.card(s)));
-        }
-        out.push_str("},search:[");
-        for s in 0..self.a.symbols.len() {
-            let sym = &self.a.symbols[s];
-            let kind = match self.modality(s) {
-                Some(_) => "rule",
-                None => sym.kind.keyword(),
-            };
-            let place = l.module_of(self.a, s).map(|m| m.title.clone()).unwrap_or_default();
-            let _ = write!(
-                out,
-                "[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"],",
-                json_esc(&sym.id),
-                json_esc(&self.title(s)),
-                kind,
-                json_esc(&l.hrefs[s]),
-                json_esc(&place)
-            );
-        }
-        let _ = write!(out, "],calc:{calc},forms:{},words:{}}};", self.forms_json(), self.words_json());
-        out
+    /// The data of the script as JSON: the cards, the search, the norms to try (`calc`: whether the calculator is
+    /// there) and the words of the script. A site loads it as `assets/data.js` (`window.VK = …`); a single page carries
+    /// it in a `<script type="application/json">`, which is data, not code – no policy has to allow it.
+    pub(crate) fn data_json(&self, l: &Layout, calc: bool) -> String {
+        let cards: Vec<String> = (0..self.a.symbols.len())
+            .map(|s| format!("\"{}\":\"{}\"", json_esc(&self.a.symbols[s].id), json_esc(&self.card(s))))
+            .collect();
+        let search: Vec<String> = (0..self.a.symbols.len())
+            .map(|s| {
+                let sym = &self.a.symbols[s];
+                let kind = match self.modality(s) {
+                    Some(_) => "rule",
+                    None => sym.kind.keyword(),
+                };
+                let place = l.module_of(self.a, s).map(|m| m.title.clone()).unwrap_or_default();
+                format!(
+                    "[\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"]",
+                    json_esc(&sym.id),
+                    json_esc(&self.title(s)),
+                    kind,
+                    json_esc(&l.hrefs[s]),
+                    json_esc(&place)
+                )
+            })
+            .collect();
+        format!(
+            "{{\"cards\":{{{}}},\"search\":[{}],\"calc\":{calc},\"forms\":{},\"words\":{}}}",
+            cards.join(","),
+            search.join(","),
+            self.forms_json(),
+            self.words_json()
+        )
     }
 
     fn verdicts(&self, m: &Module) -> Option<Verdicts> {
@@ -534,7 +539,13 @@ impl<'a> R<'a> {
         let rail =
             if rail.is_empty() || inline { String::new() } else { format!(r#"<aside class="rail">{rail}</aside>"#) };
         let script = if inline {
-            format!("<script>{}{}</script>", self.data_js(l, false), assets::JS)
+            // the data as JSON, which runs nothing; the one script is the fixed text of assets.rs, so that a static
+            // host can allow it by its hash (web/vite.config.ts)
+            format!(
+                r#"<script type="application/json" id="vk-data">{}</script><script>{}</script>"#,
+                self.data_json(l, false),
+                assets::JS
+            )
         } else {
             r#"<script src="assets/data.js"></script><script src="assets/site.js"></script>"#.to_string()
         };
@@ -1085,8 +1096,9 @@ mod tests {
         assert!(path.contains(r#"data-path="law.act.p2.guide""#) && path.contains(r#"id="step-2""#));
         // the calculator: a norm with its inputs and results, the sources under neutral names
         let data = std::fs::read_to_string(dir.join("assets/data.js")).unwrap();
+        assert!(data.starts_with("window.VK={"));
         assert!(data.contains(r#""law.act.p2.relief":{"inputs":[{"n":"wage","l":"Wage","k":"money""#), "{data}");
-        assert!(data.contains(r#""results":["law.act.p2.relief.left"]"#) && data.contains("calc:true"));
+        assert!(data.contains(r#""results":["law.act.p2.relief.left"]"#) && data.contains(r#""calc":true"#));
         let sources = std::fs::read_to_string(dir.join("assets/sources.js")).unwrap();
         assert!(sources.contains(r#""path":"0.vk""#) && !sources.contains("p1.vk"), "{sources}");
         assert!(article.contains(r#"class="calc" data-norm="law.act.p1.tax""#));
@@ -1097,7 +1109,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         let single = crate::index_html(&ws, &a, None, "en");
         assert_eq!(single.matches("<style").count(), 1);
-        assert_eq!(single.matches("<script").count(), 1);
+        assert_eq!(single.matches("<script>").count(), 1, "one script to run, besides the data");
+        assert!(single.contains(&format!("<script>{}</script>", crate::assets::JS)), "the script is the fixed text");
+        let json = single.split(r#"id="vk-data">"#).nth(1).unwrap().split("</script>").next().unwrap();
+        assert!(json.starts_with(r#"{"cards":{"#) && !json.contains(",}") && !json.contains(",]"));
         assert!(single.contains(r#"id="law.act.p2.relief""#), "the overview holds every article");
     }
 }
