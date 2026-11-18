@@ -59,10 +59,13 @@ pub(crate) fn esc(s: &str) -> String {
     out
 }
 
-/// HTML with hover cards (`data-tip`, `data-ref`); the script in `assets.rs` shows them.
-#[derive(Debug)]
+/// HTML with hover cards (`data-tip`, `data-ref`); the script in `assets.rs` shows them. `hrefs` says for every
+/// symbol where its link leads; without one, a link only opens its card.
+#[derive(Debug, Default)]
 #[cfg(feature = "html")]
-pub(crate) struct Html;
+pub(crate) struct Html {
+    pub(crate) hrefs: Vec<String>,
+}
 
 #[cfg(feature = "html")]
 impl Html {
@@ -77,9 +80,12 @@ impl Format for Html {
         esc(s)
     }
 
-    fn sym(&self, _sym: usize, id: &str, text: &str) -> String {
+    fn sym(&self, sym: usize, id: &str, text: &str) -> String {
         let id = esc(id);
-        format!(r#"<a class="ref" href="index.html#s-{id}" data-ref="{id}">{}</a>"#, esc(text))
+        match self.hrefs.get(sym) {
+            Some(href) => format!(r#"<a class="ref" href="{}" data-ref="{id}">{}</a>"#, esc(href), esc(text)),
+            None => format!(r#"<a class="ref" role="button" tabindex="0" data-ref="{id}">{}</a>"#, esc(text)),
+        }
     }
 
     fn local(&self, word: &str, name: &str, ty: &str, note: &str) -> String {

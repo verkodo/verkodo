@@ -102,15 +102,17 @@ pub fn prove_texts(texts: Vec<(String, String)>, lean_dir: &Path) -> io::Result<
     Ok((sources, outcome))
 }
 
-/// Writes the HTML pages – an index and one page per path – into `out`; with Lean's verdict if there is a report.
+/// Writes the site – a home page, one article per module, one page per path and its assets – into `out`, named
+/// `title`; with Lean's verdict if there is a report.
 pub fn render(
     sources: &Sources,
     analysis: &Analysis,
     report: Option<&Report>,
     out: &Path,
     lang: &str,
+    title: &str,
 ) -> io::Result<Vec<PathBuf>> {
-    verkodo_render::write_site(sources, analysis, report, out, lang)
+    verkodo_render::write_site(sources, analysis, report, out, lang, title)
 }
 
 /// How `pdf` runs Typst.

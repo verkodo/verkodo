@@ -39,7 +39,7 @@ enum Command {
         #[command(flatten)]
         lean: Lean,
     },
-    /// Writes HTML pages with nested hover – an index and one page per path.
+    /// Writes a site to read in – a home page, one article per module, one page per path, search and nested hover.
     Render {
         #[command(flatten)]
         input: Input,
@@ -49,6 +49,9 @@ enum Command {
         /// The language of the pages.
         #[arg(long, default_value = "de")]
         lang: String,
+        /// The name of the site, e.g. of the repository of the knowledge.
+        #[arg(long, default_value = "verkodo")]
+        title: String,
         /// Lets Lean check first and shows its verdict on the pages.
         #[arg(long)]
         prove: bool,
@@ -161,10 +164,10 @@ fn main() -> anyhow::Result<ExitCode> {
             Ok(())
         }),
         Command::Prove { input, lean } => knowledge_command(&input.paths, Some(&lean.dir), |_, _, _| Ok(())),
-        Command::Render { input, out, lang, prove, lean } => {
+        Command::Render { input, out, lang, title, prove, lean } => {
             let lean_dir = prove.then_some(lean.dir.as_path());
             knowledge_command(&input.paths, lean_dir, |sources, analysis, report| {
-                for page in knowledge::render(sources, analysis, report, &out, &lang)? {
+                for page in knowledge::render(sources, analysis, report, &out, &lang, &title)? {
                     eprintln!("wrote {}", page.display());
                 }
                 Ok(())

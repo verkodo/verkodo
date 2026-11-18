@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Pages of verkodo knowledge, one content in several formats – each a feature: `html` (an index of every
-//! declaration and one page per path; every resolved name is a link with a hover card whose links lead deeper, nothing
-//! loaded from elsewhere), `typst` (a path as a document for PDF: links and an appendix instead of hover), `markdown`
-//! (hover in editors).
+//! Pages of verkodo knowledge, one content in several formats – each a feature: `html` (a site to read in: a home
+//! page, one article per module, one page per path to work through, a tree, a search, links both ways; every resolved
+//! name is a link with a hover card whose links lead deeper, nothing loaded from elsewhere), `typst` (a path as a
+//! document for PDF: links and an appendix instead of hover), `markdown` (hover in editors).
 
 #![cfg_attr(not(any(feature = "html", feature = "typst", feature = "markdown")), allow(dead_code))]
 
@@ -21,6 +21,8 @@ mod assets;
 mod format;
 #[cfg(feature = "markdown")]
 mod markdown;
+#[cfg(feature = "html")]
+mod site;
 #[cfg(feature = "typst")]
 mod typst;
 
@@ -33,45 +35,69 @@ pub use markdown::{goals_hover, lean_hover, symbol_hover};
 pub use typst::path_document;
 
 #[cfg(feature = "html")]
+/// Writes the site into `out`: `index.html` (the home page), one article per module (`<module>.html`), one page per
+/// path (`<path>.html`) and under `assets/` the style, the script, the data of cards and search, the mark and the font.
+/// `title` names the site, e.g. the repository of the knowledge.
 pub fn write_site(
     ws: &Sources,
     a: &Analysis,
     report: Option<&Report>,
     out: &Path,
     lang: &str,
+    title: &str,
 ) -> io::Result<Vec<PathBuf>> {
-    std::fs::create_dir_all(out)?;
-    let r = R { ws, a, report, lang, f: &Html };
+    let layout = site::Layout::new(ws, a, lang, false);
+    let html = Html { hrefs: layout.hrefs.clone() };
+    let r = R { ws, a, report, lang, f: &html };
+    let assets_dir = out.join("assets");
+    std::fs::create_dir_all(assets_dir.join("fonts"))?;
     let mut written = Vec::new();
-    let index = out.join("index.html");
-    std::fs::write(&index, r.index())?;
-    written.push(index);
-    for (i, s) in a.symbols.iter().enumerate() {
-        if s.kind == SymKind::Path {
-            let p = out.join(format!("{}.html", s.id));
-            std::fs::write(&p, r.path_page(i))?;
-            written.push(p);
+    let mut put = |p: PathBuf, bytes: &[u8]| -> io::Result<()> {
+        std::fs::write(&p, bytes)?;
+        written.push(p);
+        Ok(())
+    };
+    put(out.join("index.html"), r.home(&layout, false, title).as_bytes())?;
+    for m in &layout.modules {
+        put(out.join(format!("{}.html", m.id)), r.article(&layout, m, title).as_bytes())?;
+        for &p in &m.paths {
+            put(out.join(format!("{}.html", a.symbols[p].id)), r.reading(&layout, p, false, title).as_bytes())?;
         }
+    }
+    put(assets_dir.join("site.css"), format!("{}{}", assets::font_faces("fonts/"), assets::CSS).as_bytes())?;
+    put(assets_dir.join("site.js"), assets::JS.as_bytes())?;
+    put(assets_dir.join("data.js"), r.data_js(&layout).as_bytes())?;
+    for (name, svg) in assets::MARKS {
+        put(assets_dir.join(name), svg.as_bytes())?;
+    }
+    for (name, bytes) in assets::FONTS {
+        put(assets_dir.join("fonts").join(name), bytes)?;
     }
     Ok(written)
 }
 
 #[cfg(feature = "html")]
-/// The index page as HTML, for a preview that writes no files.
+/// The home page as one HTML document with every article on it, for a preview that writes no files: style, data and
+/// script inline, in one `<style>` and one `<script>`.
 pub fn index_html(ws: &Sources, a: &Analysis, report: Option<&Report>, lang: &str) -> String {
-    R { ws, a, report, lang, f: &Html }.index()
+    let layout = site::Layout::new(ws, a, lang, true);
+    let html = Html { hrefs: layout.hrefs.clone() };
+    R { ws, a, report, lang, f: &html }.home(&layout, true, "verkodo")
 }
 
 #[cfg(feature = "html")]
-/// The page of a path as HTML (`path` is its symbol).
+/// The page of a path as one HTML document (`path` is its symbol), like [`index_html`].
 pub fn path_html(ws: &Sources, a: &Analysis, report: Option<&Report>, path: usize, lang: &str) -> String {
-    R { ws, a, report, lang, f: &Html }.path_page(path)
+    let layout = site::Layout::new(ws, a, lang, true);
+    let html = Html { hrefs: layout.hrefs.clone() };
+    R { ws, a, report, lang, f: &html }.reading(&layout, path, true, "verkodo")
 }
 
 #[cfg(feature = "html")]
-/// The hover card of a declaration as HTML – what a page shows on hover. Its classes are styled by [`CSS`].
+/// The hover card of a declaration as HTML – what a page shows on hover. Its classes are styled by [`CSS`]; its links
+/// carry `data-ref` (the id) and lead nowhere by themselves.
 pub fn card_html(ws: &Sources, a: &Analysis, report: Option<&Report>, sym: usize, lang: &str) -> String {
-    R { ws, a, report, lang, f: &Html }.card(sym)
+    R { ws, a, report, lang, f: &Html::default() }.card(sym)
 }
 
 #[cfg(feature = "html")]
@@ -184,6 +210,39 @@ impl R<'_> {
             "count" => ("Anzahl", "count"),
             "agg_all" => ("alle", "all"),
             "agg_any" => ("mindestens eines", "any"),
+            "n_checked" => ("von Lean geprüft", "checked by Lean"),
+            "n_open" => ("offen", "open"),
+            "n_rejected" => ("abgelehnt", "rejected"),
+            "area_math" => ("Mathematik", "Mathematics"),
+            "area_de" => ("Recht – Deutschland", "Law – Germany"),
+            "area_eu" => ("Recht – Europäische Union", "Law – European Union"),
+            "area_calendar" => ("Kalender", "Calendar"),
+            "search" => ("Suchen … ( / )", "Search … ( / )"),
+            "theme" => ("Hell oder dunkel", "Light or dark"),
+            "tagline" => (
+                "Mathematik und Recht, formal aufgeschrieben und von der Maschine geprüft. Jeder Begriff erklärt sich \
+                 selbst – fahre über ihn oder tippe ihn an.",
+                "Mathematics and law, written formally and checked by machine. Every term explains itself – hover over \
+                 it or tap it.",
+            ),
+            "areas" => ("Gebiete", "Areas"),
+            "articles" => ("Artikel", "articles"),
+            "entries" => ("Einträge", "entries"),
+            "home" => ("Start", "Home"),
+            "builds_on" => ("Baut auf", "Builds on"),
+            "used_by" => ("Verwendet in", "Used in"),
+            "on_page" => ("Auf dieser Seite", "On this page"),
+            "next" => ("Weiter", "Next"),
+            "understood_btn" => ("Verstanden", "Understood"),
+            "understood" => ("verstanden", "understood"),
+            "in_context" => ("Im Zusammenhang", "In context"),
+            "finished" => (
+                "Geschafft – jeder Schritt dieses Wegs ist verstanden.",
+                "Done – every step of this path is understood.",
+            ),
+            "go" => ("Zum Eintrag", "Go to the entry"),
+            "nothing" => ("Nichts gefunden.", "Nothing found."),
+            "resume" => ("Weiterlesen", "Continue"),
             _ => ("?", "?"),
         };
         if self.lang == "de" { de } else { en }
@@ -470,6 +529,11 @@ impl R<'_> {
     }
 
     fn body(&self, sym: usize) -> String {
+        self.body_with(sym, false)
+    }
+
+    /// The body of a declaration; in an article (`article`) without the list of its parts, which follow it there.
+    fn body_with(&self, sym: usize, article: bool) -> String {
         let s = &self.a.symbols[sym];
         let ws = self.ws;
         let mut out = String::new();
@@ -482,7 +546,7 @@ impl R<'_> {
                     if let Some(t) = &c.ty {
                         out += &self.row("type", &self.lean(file, t));
                     }
-                    for v in &c.variants {
+                    for v in c.variants.iter().filter(|_| !article) {
                         let vid = format!("{}.{}", s.id, v.name.text);
                         let Some(&vs) = self.a.by_id.get(&vid) else {
                             continue;
@@ -546,7 +610,9 @@ impl R<'_> {
                         .filter_map(|m| self.a.by_id.get(&format!("{}.{}", s.id, m.name.text)))
                         .map(|&m| self.sym_ref(m, &self.label(m)))
                         .collect();
-                    out += &self.row("members", &members.join(&self.f.text(" · ")));
+                    if !article {
+                        out += &self.row("members", &members.join(&self.f.text(" · ")));
+                    }
                     if self.report.is_some() {
                         out += &self.row("lean", &self.status(Key::Norm(sym), true));
                     }
@@ -563,7 +629,9 @@ impl R<'_> {
                         .filter_map(|v| self.a.by_id.get(&format!("{}.{}", s.id, v.name.text)))
                         .map(|&v| self.sym_ref(v, &self.label(v)))
                         .collect();
-                    out += &self.row("values", &values.join(&self.f.text(" · ")));
+                    if !article {
+                        out += &self.row("values", &values.join(&self.f.text(" · ")));
+                    }
                     out += &self.sources(&e.meta);
                 }
                 Item::Unit(u) => out += &self.sources(&u.meta),
@@ -574,7 +642,9 @@ impl R<'_> {
                         .filter_map(|f| self.a.by_id.get(&format!("{}.{}", s.id, f.name.text)))
                         .map(|&f| self.sym_ref(f, &self.label(f)))
                         .collect();
-                    out += &self.row("fields", &fields.join(&self.f.text(" · ")));
+                    if !article {
+                        out += &self.row("fields", &fields.join(&self.f.text(" · ")));
+                    }
                     out += &self.sources(&r.meta);
                 }
             },
@@ -716,99 +786,5 @@ impl R<'_> {
             esc(&self.a.symbols[sym].id),
             self.body(sym)
         )
-    }
-
-    #[cfg(feature = "html")]
-    fn templates(&self) -> String {
-        (0..self.a.symbols.len())
-            .map(|i| format!(r#"<template id="t-{}">{}</template>"#, esc(&self.a.symbols[i].id), self.card(i)))
-            .collect()
-    }
-
-    #[cfg(feature = "html")]
-    fn page(&self, title: &str, main: &str) -> String {
-        format!(
-            r#"<!doctype html>
-<html lang="{lang}">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<style>{css}</style>
-</head>
-<body>
-<main>
-{main}
-</main>
-{templates}
-<script>{js}</script>
-</body>
-</html>
-"#,
-            lang = esc(self.lang),
-            title = esc(title),
-            css = assets::CSS,
-            js = assets::JS,
-            templates = self.templates(),
-        )
-    }
-
-    // ---- pages ----
-
-    #[cfg(feature = "html")]
-    fn index(&self) -> String {
-        let mut main = format!(r#"<h1>verkodo</h1><p class="hint">{}</p>"#, self.w("hint"));
-        let paths: Vec<usize> =
-            (0..self.a.symbols.len()).filter(|&i| self.a.symbols[i].kind == SymKind::Path).collect();
-        if !paths.is_empty() {
-            let _ = write!(main, "<h2>{}</h2><ul>", self.w("paths"));
-            for p in paths {
-                let id = esc(&self.a.symbols[p].id);
-                let _ = write!(main, r#"<li><a href="{id}.html">{}</a></li>"#, esc(&self.label(p)));
-            }
-            main.push_str("</ul>");
-        }
-        let _ = write!(main, "<h2>{}</h2>", self.w("all"));
-        for (file, ast) in self.ws.asts.iter().enumerate() {
-            let Some(module) = &ast.module else { continue };
-            let _ = write!(main, "<h3><code>{}</code></h3>", esc(&module.joined()));
-            for (i, s) in self.a.symbols.iter().enumerate() {
-                if s.loc.file() == file {
-                    let _ = write!(main, r#"<section class="decl" id="s-{}">{}</section>"#, esc(&s.id), self.card(i));
-                }
-            }
-        }
-        self.page("verkodo", &main)
-    }
-
-    #[cfg(feature = "html")]
-    fn path_page(&self, path: usize) -> String {
-        let Loc::Item { file, item } = self.a.symbols[path].loc else {
-            return String::new();
-        };
-        let Item::Path(d) = &self.ws.asts[file].items[item] else {
-            return String::new();
-        };
-        let title = self.label(path);
-        let mut main = format!(
-            r#"<nav><a href="index.html">← {}</a></nav><h1>{}</h1><p class="hint">{}</p>"#,
-            self.w("back"),
-            esc(&title),
-            self.w("hint")
-        );
-        for (n, step) in d.steps.iter().enumerate() {
-            let Some(Target::Symbol(s)) = self.a.refs.get(&(file, step.span)) else {
-                continue;
-            };
-            let _ = write!(
-                main,
-                r#"<section class="step"><h2><span class="num">{}</span> {}: {}</h2>{}</section>"#,
-                n + 1,
-                self.kind_word(*s),
-                esc(&self.title(*s)),
-                self.body(*s) + &self.in_path(*s, path)
-            );
-        }
-        self.page(&title, &main)
     }
 }
