@@ -232,6 +232,38 @@ a.tile:hover { border-color: var(--titan); }
 .finished { display: none; text-align: center; padding: 22px; color: var(--muted); }
 .finished.show { display: block; }
 
+/* the calculator */
+.calc { margin-top: 14px; }
+.calc .panel { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); }
+.calc .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 16px;
+  padding: 14px 16px; }
+.field { display: flex; flex-direction: column; gap: 4px; font: 13px var(--sans); color: var(--muted); min-width: 0; }
+.field.check { flex-direction: row; align-items: center; gap: 8px; }
+.field.wide, .field.rec { grid-column: 1 / -1; }
+.field.rec { border: 1px dashed var(--line); border-radius: 6px; padding: 8px 12px 12px; margin: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 14px; }
+.field.rec legend { padding: 0 4px; color: var(--faint); font-size: 12px; }
+.field input[type=text], .field input[type=date], .field select, .field textarea { font: 14px var(--sans);
+  color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px;
+  width: 100%; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--titan); }
+.field .num { display: flex; align-items: center; gap: 6px; }
+.field .unit { color: var(--faint); }
+.calc .out { border-top: 1px solid var(--line); padding: 12px 16px 14px; }
+.calc .res { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; margin: 6px 0 10px;
+  font-size: 17px; }
+.calc .res dt { color: var(--text); }
+.calc .res dd { margin: 0; font: 600 15px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.calc .trace { list-style: none; padding: 0; margin: 8px 0 0; font-size: 15px; }
+.calc .trace li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 4px 0;
+  border-bottom: 1px dotted var(--line); }
+.calc .trace .val { font: 13px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.calc .trace .unknown, .calc .res .unknown { color: var(--faint); font-weight: 400; }
+.calc .trace .why { grid-column: 1 / -1; font: 12px var(--sans); color: var(--faint); }
+.calc .msg { padding: 12px 16px; font: 14px var(--sans); color: var(--muted); }
+.calc h4 { margin: 0; font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .07em;
+  color: var(--faint); }
+
 /* hover cards */
 .pop { position: absolute; z-index: 40; width: min(34rem, calc(100vw - 16px)); background: var(--panel);
   border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 16px; line-height: 1.5;
@@ -460,6 +492,121 @@ pub const JS: &str = r#"
     refresh();
   }
   document.querySelectorAll('[data-progress]').forEach((el) => paint(el.dataset.progress, Number(el.dataset.steps || 0)));
+  // the calculator: a norm computed in this browser by verkodo as WebAssembly, every step shown
+  let engine = null;
+  async function start() {
+    if (engine) return engine;
+    if (!window.VK_SOURCES) {
+      await new Promise((ok, no) => {
+        const s = document.createElement('script');
+        s.src = 'assets/sources.js'; s.onload = ok; s.onerror = no; document.head.appendChild(s);
+      });
+    }
+    const { instance } = await WebAssembly.instantiate(await (await fetch('assets/verkodo.wasm')).arrayBuffer(), {});
+    const x = instance.exports, enc = new TextEncoder(), dec = new TextDecoder();
+    const call = (op, req) => {
+      const b = enc.encode(JSON.stringify(req));
+      const at = x.vk_buffer(b.length);
+      new Uint8Array(x.memory.buffer, at, b.length).set(b);
+      const n = x[op]();
+      return JSON.parse(dec.decode(new Uint8Array(x.memory.buffer, x.vk_address(), n)));
+    };
+    call('vk_load', window.VK_SOURCES);
+    engine = call;
+    return call;
+  }
+  const where = new Map((VK.search || []).map((e) => [e[0], e]));
+  const termLink = (id, label) => {
+    const e = where.get(id);
+    return `<a class="ref" data-ref="${esc(id)}"${e ? ` href="${esc(e[3])}"` : ''}>${esc(label || (e && e[1]) || id.split('.').pop())}</a>`;
+  };
+  function field(spec, path) {
+    const name = esc(spec.l || spec.n);
+    const tag = spec.j ? ` <span class="chip">${esc(W('judgement'))}</span>` : '';
+    const at = `data-in="${esc(path)}" data-k="${esc(spec.k)}"`;
+    switch (spec.k) {
+      case 'bool': return `<label class="field check"><input type="checkbox" ${at}><span>${name}${tag}</span></label>`;
+      case 'enumeration':
+        return `<label class="field"><span>${name}${tag}</span><select ${at}>${(spec.v || []).map((v) => `<option value="${esc(v[0])}">${esc(v[1] || v[0])}</option>`).join('')}</select></label>`;
+      case 'date': return `<label class="field"><span>${name}${tag}</span><input type="date" ${at}></label>`;
+      case 'record':
+        return `<fieldset class="field rec"><legend>${name}</legend>${(spec.f || []).map((f) => field(f, path + '.' + f.n)).join('')}</fieldset>`;
+      case 'list':
+        return `<label class="field wide"><span>${name}${tag}</span><textarea rows="3" ${at} placeholder="${esc('[{' + (spec.f || []).map((f) => `"${f.n}": …`).join(', ') + '}]')}"></textarea></label>`;
+      default: {
+        const unit = spec.k === 'money' ? '€' : spec.u || '';
+        return `<label class="field"><span>${name}${tag}</span><span class="num"><input type="text" inputmode="decimal" placeholder="0" ${at}>${unit ? `<span class="unit">${esc(unit)}</span>` : ''}</span></label>`;
+      }
+    }
+  }
+  function read(box, spec, path) {
+    if (spec.k === 'record') {
+      const o = {};
+      for (const f of spec.f || []) {
+        const v = read(box, f, path + '.' + f.n);
+        o[f.n] = f.k === 'bool' ? v === 'true' : f.k === 'record' ? JSON.parse(v) : v;
+      }
+      return JSON.stringify(o);
+    }
+    const el = box.querySelector(`[data-in="${CSS.escape(path)}"]`);
+    if (!el) return '';
+    if (spec.k === 'bool') return String(el.checked);
+    if (spec.k === 'list') return el.value.trim() || '[]';
+    if (spec.k === 'date' || spec.k === 'enumeration') return el.value;
+    return el.value.trim() || '0';
+  }
+  // a value as people write it: numbers grouped in the page's language, money with two decimals and "€", truth values
+  // as words, values of enumerations by their label
+  const lang = root.lang || 'de';
+  function show(v, k) {
+    if (v === 'true' || v === 'false') return W(v === 'true' ? 'yes' : 'no');
+    const n = Number(String(v).replace(/\s*EUR$/, ''));
+    if (String(v).trim() !== '' && Number.isFinite(n)) {
+      if (k === 'money') {
+        const whole = Number.isInteger(n);
+        return n.toLocaleString(lang, { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 }) + '\u00a0€';
+      }
+      return n.toLocaleString(lang, { maximumFractionDigits: 6 });
+    }
+    const e = where.get(String(v));
+    return e ? e[1] : v;
+  }
+  function openCalc(box) {
+    const id = box.dataset.norm, form = (VK.forms || {})[id];
+    if (!form) return;
+    box.innerHTML = `<div class="panel"><div class="form">${form.inputs.map((i) => field(i, i.n)).join('')}</div><div class="out"><p class="msg">${esc(W('loading'))}</p></div></div>`;
+    const out = box.querySelector('.out');
+    let t = null;
+    const run = async () => {
+      let call;
+      try { call = await start(); } catch (e) { out.innerHTML = `<p class="msg">${esc(W('calc_failed'))}</p>`; return; }
+      const inputs = {};
+      for (const i of form.inputs) inputs[i.n] = read(box, i, i.n);
+      const steps = call('vk_eval', { norm: id, inputs }) || [];
+      const by = new Map(steps.map((s) => [s.id, s]));
+      const val = (s) => s ? `<span class="${s.known ? '' : 'unknown'}">${esc(s.known ? show(s.value, (form.types || {})[s.id]) : s.value)}</span>` : '';
+      const res = form.results.map((r) => by.get(r)).filter(Boolean);
+      const rest = steps.filter((s) => s.kind !== 'input' && s.kind !== 'judgement');
+      out.innerHTML = `<h4>${esc(W('results'))}</h4><dl class="res">${res.map((s) => `<dt>${termLink(s.id, s.label)}</dt><dd>${val(s)}</dd>`).join('')}</dl>`
+        + `<details><summary>${esc(W('trace'))} · ${rest.length}</summary><ol class="trace">${rest.map((s) => {
+          const hit = (s.exceptions || []).findIndex((e) => e[1]);
+          const why = hit >= 0 ? `<span class="why">${esc(W('applied'))}: ${esc(W('unless'))} ${hit + 1}</span>` : '';
+          return `<li><span>${termLink(s.id, s.label)}</span><span class="val">${val(s)}</span>${why}</li>`;
+        }).join('')}</ol></details>`;
+    };
+    box.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 200); });
+    box.addEventListener('change', () => { clearTimeout(t); t = setTimeout(run, 50); });
+    run();
+  }
+  if (VK.calc) {
+    document.querySelectorAll('.calc[data-norm]').forEach((box) => {
+      if (!(VK.forms || {})[box.dataset.norm]) return;
+      box.hidden = false;
+      box.innerHTML = `<button class="btn" type="button">▶ ${esc(W('try'))}</button>`;
+      box.querySelector('button').addEventListener('click', () => openCalc(box), { once: true });
+    });
+  }
+
   const resume = document.getElementById('resume');
   if (resume) {
     const paths = Object.entries(store.get('paths', {})).sort((a, b) => b[1].at - a[1].at)

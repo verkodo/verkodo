@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use verkodo_core::proof::{Key, Status};
-use verkodo_core::{Analysis, Loc, Sources, SymKind, Target};
+use verkodo_core::{Analysis, Loc, Sources, SymKind, Target, Ty};
 use verkodo_syntax::ast::Item;
 
 use super::R;
@@ -229,13 +229,127 @@ impl<'a> R<'a> {
             "nothing",
             "understood",
             "resume",
+            "try",
+            "compute",
+            "results",
+            "trace",
+            "inputs_word",
+            "loading",
+            "calc_failed",
+            "yes",
+            "no",
+            "not_given",
+            "applied",
+            "rule_default",
+            "close",
+            "unless",
         ];
         let pairs: Vec<String> = keys.iter().map(|k| format!("\"{k}\":\"{}\"", json_esc(self.w(k)))).collect();
         format!("{{{}}}", pairs.join(","))
     }
 
-    /// `window.VK`: the cards, the search and the words of the script.
-    pub(crate) fn data_js(&self, l: &Layout) -> String {
+    /// What a field of a calculator asks for, as JSON: name, label, kind, and the values of an enumeration, the unit
+    /// of an amount or the fields of a record.
+    fn input_spec(&self, sym: usize, depth: usize) -> String {
+        let ty = self.a.member_types.get(&sym).copied().unwrap_or(Ty::Unknown);
+        let name = self.a.symbols[sym].id.rsplit('.').next().unwrap_or_default();
+        let children = |of: usize, kind: SymKind| -> Vec<usize> {
+            (0..self.a.symbols.len())
+                .filter(|&c| self.a.symbols[c].kind == kind && self.a.parent(c) == Some(of))
+                .collect()
+        };
+        let mut extra = String::new();
+        match ty {
+            Ty::Enum(e) => {
+                let values: Vec<String> = children(e, SymKind::Value)
+                    .into_iter()
+                    .map(|v| {
+                        let n = self.a.symbols[v].id.rsplit('.').next().unwrap_or_default();
+                        format!("[\"{}\",\"{}\"]", json_esc(n), json_esc(&self.label(v)))
+                    })
+                    .collect();
+                let _ = write!(extra, ",\"v\":[{}]", values.join(","));
+            }
+            Ty::Quantity(u) => {
+                let _ = write!(extra, ",\"u\":\"{}\"", json_esc(&self.label(u)));
+            }
+            Ty::Record(r) | Ty::List(r) if depth < 3 => {
+                let fields: Vec<String> =
+                    children(r, SymKind::Field).into_iter().map(|f| self.input_spec(f, depth + 1)).collect();
+                let _ = write!(extra, ",\"f\":[{}]", fields.join(","));
+            }
+            _ => {}
+        }
+        format!(
+            "{{\"n\":\"{}\",\"l\":\"{}\",\"k\":\"{}\",\"j\":{}{extra}}}",
+            json_esc(name),
+            json_esc(&self.label(sym)),
+            ty.name(),
+            self.a.symbols[sym].kind == SymKind::Judgement
+        )
+    }
+
+    /// The norms that can be tried, as JSON: for each, its inputs and its results – the rules and values no other
+    /// member of the norm uses.
+    fn forms_json(&self) -> String {
+        let mut out = Vec::new();
+        for n in 0..self.a.symbols.len() {
+            if self.a.symbols[n].kind != SymKind::Norm {
+                continue;
+            }
+            let mut members: Vec<usize> = (0..self.a.symbols.len()).filter(|&m| self.a.parent(m) == Some(n)).collect();
+            members.sort_by_key(|&m| self.a.symbols[m].span.start);
+            let inputs: Vec<usize> = members
+                .iter()
+                .copied()
+                .filter(|&m| matches!(self.a.symbols[m].kind, SymKind::Input | SymKind::Judgement))
+                .collect();
+            if inputs.is_empty() {
+                continue;
+            }
+            let used: BTreeSet<usize> = members.iter().flat_map(|&m| self.a.deps[m].iter().copied()).collect();
+            let results: Vec<String> = members
+                .iter()
+                .copied()
+                .filter(|&m| matches!(self.a.symbols[m].kind, SymKind::Rule | SymKind::Constant) && !used.contains(&m))
+                .map(|m| format!("\"{}\"", json_esc(&self.a.symbols[m].id)))
+                .collect();
+            let specs: Vec<String> = inputs.iter().map(|&i| self.input_spec(i, 0)).collect();
+            // the kind of every member, so that the page can write its value: money with "€", numbers grouped
+            let types: Vec<String> = members
+                .iter()
+                .map(|&m| {
+                    let ty = self.a.member_types.get(&m).copied().unwrap_or(Ty::Unknown);
+                    format!("\"{}\":\"{}\"", json_esc(&self.a.symbols[m].id), ty.name())
+                })
+                .collect();
+            out.push(format!(
+                "\"{}\":{{\"inputs\":[{}],\"results\":[{}],\"types\":{{{}}}}}",
+                json_esc(&self.a.symbols[n].id),
+                specs.join(","),
+                results.join(","),
+                types.join(",")
+            ));
+        }
+        format!("{{{}}}", out.join(","))
+    }
+
+    /// The sources for the calculator in the browser: the files under neutral names (their modules name them), so that
+    /// no path of the machine that rendered them goes out.
+    pub(crate) fn sources_js(&self) -> String {
+        let files: Vec<String> = self
+            .ws
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| format!("{{\"path\":\"{i}.vk\",\"text\":\"{}\"}}", json_esc(&f.text)))
+            .collect();
+        format!("window.VK_SOURCES={{\"lang\":\"{}\",\"files\":[{}]}};", json_esc(self.lang), files.join(","))
+    }
+
+    /// `window.VK`: the cards, the search, the norms to try (`calc`: whether the calculator is there) and the words
+    /// of the script.
+    pub(crate) fn data_js(&self, l: &Layout, calc: bool) -> String {
         let mut out = String::from("window.VK={cards:{");
         for s in 0..self.a.symbols.len() {
             let _ = write!(out, "\"{}\":\"{}\",", json_esc(&self.a.symbols[s].id), json_esc(&self.card(s)));
@@ -258,7 +372,7 @@ impl<'a> R<'a> {
                 json_esc(&place)
             );
         }
-        let _ = write!(out, "],words:{}}};", self.words_json());
+        let _ = write!(out, "],calc:{calc},forms:{},words:{}}};", self.forms_json(), self.words_json());
         out
     }
 
@@ -405,7 +519,7 @@ impl<'a> R<'a> {
         let rail =
             if rail.is_empty() || inline { String::new() } else { format!(r#"<aside class="rail">{rail}</aside>"#) };
         let script = if inline {
-            format!("<script>{}{}</script>", self.data_js(l), assets::JS)
+            format!("<script>{}{}</script>", self.data_js(l, false), assets::JS)
         } else {
             r#"<script src="assets/data.js"></script><script src="assets/site.js"></script>"#.to_string()
         };
@@ -583,11 +697,16 @@ impl<'a> R<'a> {
         for &s in &m.items {
             let _ = write!(
                 main,
-                r#"<section class="decl" id="{id}"><header><span class="chip kind-tag">{kind}</span><h2>{title}</h2><span class="id">{id}</span></header>{body}{parts}{uses}{used}</section>"#,
+                r#"<section class="decl" id="{id}"><header><span class="chip kind-tag">{kind}</span><h2>{title}</h2><span class="id">{id}</span></header>{body}{calc}{parts}{uses}{used}</section>"#,
                 id = esc(&self.a.symbols[s].id),
                 kind = esc(self.kind_word(s)),
                 title = esc(&self.title(s)),
                 body = self.body_with(s, true),
+                calc = if self.a.symbols[s].kind == SymKind::Norm {
+                    format!(r#"<div class="calc" data-norm="{}" hidden></div>"#, esc(&self.a.symbols[s].id))
+                } else {
+                    String::new()
+                },
                 parts = self.parts(s),
                 uses = self.links_row(l, "builds_on", &l.uses[s]),
                 used = self.links_row(l, "used_by", &l.used_by[s]),
@@ -747,7 +866,7 @@ mod tests {
     fn a_site_has_its_pages_and_a_single_page_carries_one_style_and_one_script() {
         let (ws, a) = sample();
         let dir = std::env::temp_dir().join(format!("verkodo-site-{}", std::process::id()));
-        let written = crate::write_site(&ws, &a, None, &dir, "en", "Test").unwrap();
+        let written = crate::write_site(&ws, &a, None, &dir, "en", "Test", Some(b"\0asm")).unwrap();
         let names: Vec<String> =
             written.iter().map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/")).collect();
         for want in ["index.html", "law.act.p1.html", "law.act.p2.html", "law.act.p2.guide.html", "assets/data.js"] {
@@ -758,6 +877,13 @@ mod tests {
         assert!(article.contains("Used in") && article.contains("law.act.p2.html#law.act.p2.relief"), "{article}");
         let path = std::fs::read_to_string(dir.join("law.act.p2.guide.html")).unwrap();
         assert!(path.contains(r#"data-path="law.act.p2.guide""#) && path.contains(r#"id="step-2""#));
+        // the calculator: a norm with its inputs and results, the sources under neutral names
+        let data = std::fs::read_to_string(dir.join("assets/data.js")).unwrap();
+        assert!(data.contains(r#""law.act.p2.relief":{"inputs":[{"n":"wage","l":"Wage","k":"money""#), "{data}");
+        assert!(data.contains(r#""results":["law.act.p2.relief.left"]"#) && data.contains("calc:true"));
+        let sources = std::fs::read_to_string(dir.join("assets/sources.js")).unwrap();
+        assert!(sources.contains(r#""path":"0.vk""#) && !sources.contains("p1.vk"), "{sources}");
+        assert!(article.contains(r#"class="calc" data-norm="law.act.p1.tax""#));
         std::fs::remove_dir_all(&dir).unwrap();
         let single = crate::index_html(&ws, &a, None, "en");
         assert_eq!(single.matches("<style").count(), 1);

@@ -37,7 +37,8 @@ pub use typst::path_document;
 #[cfg(feature = "html")]
 /// Writes the site into `out`: `index.html` (the home page), one article per module (`<module>.html`), one page per
 /// path (`<path>.html`) and under `assets/` the style, the script, the data of cards and search, the mark and the font.
-/// `title` names the site, e.g. the repository of the knowledge.
+/// `title` names the site, e.g. the repository of the knowledge. With `wasm` – verkodo as WebAssembly, the web
+/// editor's build – the norms can be tried on their pages: the module and the sources go to `assets/` as well.
 pub fn write_site(
     ws: &Sources,
     a: &Analysis,
@@ -45,6 +46,7 @@ pub fn write_site(
     out: &Path,
     lang: &str,
     title: &str,
+    wasm: Option<&[u8]>,
 ) -> io::Result<Vec<PathBuf>> {
     let layout = site::Layout::new(ws, a, lang, false);
     let html = Html { hrefs: layout.hrefs.clone() };
@@ -66,7 +68,11 @@ pub fn write_site(
     }
     put(assets_dir.join("site.css"), format!("{}{}", assets::font_faces("fonts/"), assets::CSS).as_bytes())?;
     put(assets_dir.join("site.js"), assets::JS.as_bytes())?;
-    put(assets_dir.join("data.js"), r.data_js(&layout).as_bytes())?;
+    put(assets_dir.join("data.js"), r.data_js(&layout, wasm.is_some()).as_bytes())?;
+    if let Some(wasm) = wasm {
+        put(assets_dir.join("verkodo.wasm"), wasm)?;
+        put(assets_dir.join("sources.js"), r.sources_js().as_bytes())?;
+    }
     for (name, svg) in assets::MARKS {
         put(assets_dir.join(name), svg.as_bytes())?;
     }
@@ -243,6 +249,22 @@ impl R<'_> {
             "go" => ("Zum Eintrag", "Go to the entry"),
             "nothing" => ("Nichts gefunden.", "Nothing found."),
             "resume" => ("Weiterlesen", "Continue"),
+            "try" => ("Ausprobieren", "Try it"),
+            "compute" => ("Berechnen", "Compute"),
+            "results" => ("Ergebnis", "Result"),
+            "trace" => ("Rechenweg", "How it was computed"),
+            "inputs_word" => ("Eingaben", "Inputs"),
+            "loading" => ("Lädt …", "Loading …"),
+            "calc_failed" => (
+                "Der Rechner braucht die Seite über einen Webserver (nicht als Datei geöffnet).",
+                "The calculator needs the page from a web server (not opened as a file).",
+            ),
+            "yes" => ("ja", "yes"),
+            "no" => ("nein", "no"),
+            "not_given" => ("nicht angegeben", "not given"),
+            "applied" => ("greift", "applies"),
+            "rule_default" => ("Grundsatz", "as a rule"),
+            "close" => ("Schließen", "Close"),
             _ => ("?", "?"),
         };
         if self.lang == "de" { de } else { en }

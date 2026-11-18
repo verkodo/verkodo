@@ -21,6 +21,12 @@ pub fn around<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> 
 #[allow_missing = true]
 struct WebApp;
 
+/// verkodo as WebAssembly from the built web editor – for pages that compute in the browser (`verkodo render`); `None`
+/// in a build without the web editor.
+pub fn wasm() -> Option<Vec<u8>> {
+    WebApp::iter().find(|p| p.ends_with(".wasm")).and_then(|p| WebApp::get(&p)).map(|f| f.data.into_owned())
+}
+
 /// What the web app may load: itself only – no script, style, font or connection elsewhere, no frames around it.
 /// Two openings, both for the editor: `'wasm-unsafe-eval'` lets it compile verkodo's WebAssembly module (not `eval`
 /// for JavaScript), and a nonce, new with every page, lets the editor add its style elements and the preview its

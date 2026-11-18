@@ -167,7 +167,8 @@ fn main() -> anyhow::Result<ExitCode> {
         Command::Render { input, out, lang, title, prove, lean } => {
             let lean_dir = prove.then_some(lean.dir.as_path());
             knowledge_command(&input.paths, lean_dir, |sources, analysis, report| {
-                for page in knowledge::render(sources, analysis, report, &out, &lang, &title)? {
+                let wasm = verkodo_web::wasm();
+                for page in knowledge::render(sources, analysis, report, &out, &lang, &title, wasm.as_deref())? {
                     eprintln!("wrote {}", page.display());
                 }
                 Ok(())
