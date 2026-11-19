@@ -97,6 +97,27 @@ path analysis1 {                  // a lecture, a guide, a commentary
 A **path** is a route through the knowledge. verkodo checks its order: a step that uses something the path has not
 introduced yet gets a warning. A second variant of a concept is fine once a bridge connects it to the first.
 
+## Documents
+
+A `source` is text – `"§ 19 Abs. 1 UStG"`. A **document** says once where such sources lead: how they cite it, its
+address, where one of its sections is, and when it was read.
+
+```text
+document ustg {
+  label de "Umsatzsteuergesetz"
+  cite "UStG"                                                   // how sources name it; several are fine
+  url "https://www.gesetze-im-internet.de/ustg_1980/"
+  section "https://www.gesetze-im-internet.de/ustg_1980/__{n}.html"   // {n}: the number after § or Art.
+  retrieved "2026-11-06"
+}
+```
+
+A source cites the document whose `cite` stands first in it, as whole words (`PAP 2026, MRE4 (§ 19 EStG)` cites the
+plan, not the act in brackets); its link is the `section` with the number of the last § or Art. before the cite, else
+the `url`. Pages show every such source as a link. Once a workspace has documents, `check` warns about every source
+that cites none, about addresses that are not `https://…`, a `section` without `{n}` and a date not written
+`YYYY-MM-DD`. A document without an address – a book – is fine: its sources stay text.
+
 ## Translations
 
 A label in German law is the law's own word; its English is already a translation. So a module names the languages it

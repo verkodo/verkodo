@@ -35,7 +35,10 @@ pub(crate) trait Format {
     /// A paragraph of plain text.
     fn para(&self, s: &str) -> String;
     /// The source of a declaration: the word "Source" and the source, both plain text.
-    fn source(&self, word: &str, s: &str) -> String;
+    /// A source, linked to its address when it cites a document that has one.
+    fn source(&self, word: &str, s: &str, url: Option<&str>) -> String;
+    /// A link to an address outside.
+    fn link(&self, text: &str, url: &str) -> String;
     /// A numbered list of markup items.
     fn ordered(&self, items: &[String]) -> String;
     /// A space that does not break.
@@ -152,8 +155,16 @@ impl Format for Html {
         format!(r#"<p class="text">{}</p>"#, esc(s))
     }
 
-    fn source(&self, word: &str, s: &str) -> String {
-        format!(r#"<div class="src">{}: {}</div>"#, esc(word), esc(s))
+    fn source(&self, word: &str, s: &str, url: Option<&str>) -> String {
+        let s = match url {
+            Some(u) => self.link(s, u),
+            None => esc(s),
+        };
+        format!(r#"<div class="src">{}: {s}</div>"#, esc(word))
+    }
+
+    fn link(&self, text: &str, url: &str) -> String {
+        format!(r#"<a class="ext" href="{}" rel="noopener">{}</a>"#, esc(url), esc(text))
     }
 
     fn ordered(&self, items: &[String]) -> String {

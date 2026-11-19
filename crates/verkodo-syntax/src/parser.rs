@@ -412,9 +412,10 @@ impl Parser<'_> {
                 Tok::Ident(k) if k == "enum" => self.enum_decl().map(Item::Enum),
                 Tok::Ident(k) if k == "unit" => self.unit_decl().map(Item::Unit),
                 Tok::Ident(k) if k == "record" => self.record_decl().map(Item::Record),
+                Tok::Ident(k) if k == "document" => self.document_decl().map(Item::Document),
                 _ => {
                     self.unexpected(
-                        "a file (expected concept, theorem, example, remark, norm, path, enum, unit or record)",
+                        "a file (expected concept, theorem, example, remark, norm, path, enum, unit, record or document)",
                     );
                     continue;
                 }
@@ -793,6 +794,47 @@ impl Parser<'_> {
         let mut meta = Meta::default();
         let end = self.opt_meta_block(level, &mut meta).unwrap_or(name.span);
         Some(UnitDecl { name, meta, span: start.to(end) })
+    }
+
+    /// `document <name> { label … cite "…" url "…" section "…" retrieved "…" }`.
+    fn document_decl(&mut self) -> Option<DocumentDecl> {
+        let start = self.bump().span;
+        let level = self.level();
+        let name = self.name()?;
+        let mut d = DocumentDecl {
+            name,
+            meta: Meta::default(),
+            cites: Vec::new(),
+            url: None,
+            section: None,
+            retrieved: None,
+            span: start,
+        };
+        let end = self.block(level, |p| {
+            if p.meta(&mut d.meta) {
+                return;
+            }
+            let slot = if p.at_kw("cite") {
+                None
+            } else if p.at_kw("url") {
+                Some(&mut d.url)
+            } else if p.at_kw("section") {
+                Some(&mut d.section)
+            } else if p.at_kw("retrieved") {
+                Some(&mut d.retrieved)
+            } else {
+                p.unexpected("a document (expected label, source, cite, url, section or retrieved)");
+                return;
+            };
+            p.bump();
+            let Some(v) = p.prose() else { return };
+            match slot {
+                None => d.cites.push(v),
+                Some(slot) => *slot = Some(v),
+            }
+        });
+        d.span = start.to(end);
+        Some(d)
     }
 
     /// `record <name> { label … field <name> : <type> [{ label … }] … }`.
@@ -1219,6 +1261,10 @@ mod tests {
                     out += &format!("enum {} [{}] {}\n", e.name.text, labels(&e.meta), values.join(" "));
                 }
                 Item::Unit(u) => out += &format!("unit {} [{}]\n", u.name.text, labels(&u.meta)),
+                Item::Document(d) => {
+                    let cites: Vec<&str> = d.cites.iter().map(|c| c.0.as_str()).collect();
+                    out += &format!("document {} [{}] {}\n", d.name.text, labels(&d.meta), cites.join(" | "));
+                }
                 Item::Record(r) => {
                     let fields: Vec<String> = r
                         .fields

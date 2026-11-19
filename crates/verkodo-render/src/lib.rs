@@ -60,6 +60,10 @@ pub fn write_site(
         Ok(())
     };
     put(out.join("index.html"), r.home(&layout, false, title).as_bytes())?;
+    put(out.join("how-to-read.html"), r.how_to_read(&layout, title).as_bytes())?;
+    for n in layout.nodes.values().filter(|n| n.module.is_none()) {
+        put(out.join(format!("{}.html", n.id)), r.overview(&layout, n, title).as_bytes())?;
+    }
     for m in &layout.modules {
         put(out.join(format!("{}.html", m.id)), r.article(&layout, m, title).as_bytes())?;
         for &p in &m.paths {
@@ -206,6 +210,105 @@ impl R<'_> {
             "values" => ("Ausprägungen", "Values"),
             "unit" => ("Einheit", "Unit"),
             "record" => ("Datensatz", "Record"),
+            "document" => ("Dokument", "Document"),
+            "cite" => ("zitiert als", "cited as"),
+            "url" => ("Adresse", "Address"),
+            "retrieved" => ("abgerufen", "retrieved"),
+            // what each kind is – the hover over a kind and the page on how to read
+            "help_concept" => (
+                "Ein Begriff: ein Wort mit einer festen Bedeutung, gegeben durch eine oder mehrere Definitionen.",
+                "A concept: a word with a fixed meaning, given by one or more definitions.",
+            ),
+            "help_variant" => (
+                "Eine Definition eines Begriffs. Hat ein Begriff mehrere, zeigt eine Brücke, dass sie dasselbe meinen.",
+                "One definition of a concept. Where a concept has several, a bridge shows they mean the same.",
+            ),
+            "help_theorem" => (
+                "Ein Satz: eine Aussage mit Beweis. Lean prüft den Beweis Schritt für Schritt.",
+                "A theorem: a statement with a proof. Lean checks the proof step by step.",
+            ),
+            "help_example" => (
+                "Ein Beispiel: ein konkreter Fall mit Ergebnis, von Lean nachgerechnet.",
+                "An example: a concrete case with its result, recomputed by Lean.",
+            ),
+            "help_remark" => (
+                "Eine Bemerkung: Erläuterung in Worten, ohne eigene Aussage.",
+                "A remark: an explanation in words, without a claim of its own.",
+            ),
+            "help_norm" => (
+                "Eine Norm: eine Vorschrift als Rechnung – aus Eingaben folgen über Regeln die Ergebnisse.",
+                "A provision: a rule of law as a computation – inputs lead through rules to results.",
+            ),
+            "help_input" => (
+                "Eine Eingabe: ein Umstand des Falls, den man angibt – etwa der Arbeitslohn.",
+                "An input: a fact of the case that you give – the wage, say.",
+            ),
+            "help_judgement" => (
+                "Eine Wertung: ein unbestimmter Rechtsbegriff. Kein Fakt, sondern eine Entscheidung, die jemand \
+                 begründen muss.",
+                "A judgement: an undetermined legal term. Not a fact but a decision someone has to justify.",
+            ),
+            "help_constant" => (
+                "Ein fester Wert der Norm – etwa ein Grenzbetrag.",
+                "A fixed value of the provision – a threshold, say.",
+            ),
+            "help_rule" => (
+                "Eine Regel: wie ein Ergebnis aus Eingaben und anderen Regeln folgt, mit ihren Ausnahmen.",
+                "A rule: how a result follows from inputs and other rules, with its exceptions.",
+            ),
+            "help_obligation" => ("Eine Pflicht: was jemand tun muss.", "An obligation: what someone must do."),
+            "help_permission" => ("Eine Erlaubnis: was jemand tun darf.", "A permission: what someone may do."),
+            "help_prohibition" => {
+                ("Ein Verbot: was jemand nicht tun darf.", "A prohibition: what someone must not do.")
+            }
+            "help_path" => (
+                "Ein Weg: eine Vorlesung oder ein Leitfaden – Schritt für Schritt durch das Wissen, mit Fortschritt.",
+                "A path: a lecture or a guide – step by step through the knowledge, with your progress.",
+            ),
+            "help_enum" => (
+                "Eine Aufzählung: ein Datentyp mit festen Ausprägungen – etwa die Steuerklassen I bis VI.",
+                "An enumeration: a data type with fixed values – the tax classes I to VI, say.",
+            ),
+            "help_value" => ("Eine Ausprägung einer Aufzählung.", "A value of an enumeration."),
+            "help_unit" => ("Eine Einheit für Mengen – etwa km.", "A unit for amounts – km, say."),
+            "help_record" => (
+                "Ein Datensatz: mehrere Felder, die zusammengehören – etwa die Angaben zur Versicherung.",
+                "A record: several fields that belong together – the details of an insurance, say.",
+            ),
+            "help_field" => ("Ein Feld eines Datensatzes.", "A field of a record."),
+            "help_document" => (
+                "Ein Dokument, auf das sich Quellen beziehen – ein Gesetz, ein Schreiben, ein Buch –, mit Adresse.",
+                "A document sources refer to – an act, a circular, a book –, with its address.",
+            ),
+            "more" => ("Mehr", "More"),
+            "all_kinds" => ("Alle", "All"),
+            "group" => ("Übersicht", "Overview"),
+            "all_items" => ("– alle in der Übersicht", "– all in the overview"),
+            "more_items" => ("weitere", "more"),
+            "contents" => ("Inhalt", "Contents"),
+            "how_to_read" => ("So liest du diese Seiten", "How to read these pages"),
+            "how_intro" => (
+                "Alles hier ist formal aufgeschrieben: jede Deklaration hat eine Art, und die Art sagt, was sie ist und \
+                 wie man sie liest. Ein Symbol und ein Rahmen zeigen die Art; über dem Namen der Art steht ihre \
+                 Erklärung.",
+                "Everything here is written formally: each declaration has a kind, and the kind says what it is and how \
+                 to read it. A symbol and a frame show the kind; hovering over the kind's name explains it.",
+            ),
+            "how_frames" => (
+                "Rahmen: durchgezogen für das, was festlegt (Begriff, Definition, Norm); ein Strich links für \
+                 Aussagen (Satz, Pflicht, Erlaubnis, Verbot); gestrichelt für Beispiele; gepunktet für Datentypen; \
+                 ohne Rahmen für Bemerkungen.",
+                "Frames: solid for what defines (concept, definition, provision); a line on the left for claims \
+                 (theorem, obligation, permission, prohibition); dashed for examples; dotted for data types; none \
+                 for remarks.",
+            ),
+            "how_lean" => (
+                "✓ von Lean geprüft heißt: der Beweisassistent Lean hat Beweis oder Rechnung nachvollzogen. OFFEN \
+                 heißt: es fehlt noch – das ist sichtbar, nie versteckt.",
+                "✓ checked by Lean means: the proof assistant Lean has followed the proof or computation. OPEN means: \
+                 it is still missing – visible, never hidden.",
+            ),
+            "example_of_kind" => ("Beispiel hier", "Example here"),
             "field" => ("Feld", "Field"),
             "fields" => ("Felder", "Fields"),
             "by" => ("nach", "by"),
@@ -224,7 +327,7 @@ impl R<'_> {
             "area_de" => ("Recht – Deutschland", "Law – Germany"),
             "area_eu" => ("Recht – Europäische Union", "Law – European Union"),
             "area_calendar" => ("Kalender", "Calendar"),
-            "search" => ("Suchen … ( / )", "Search … ( / )"),
+            "search" => ("Suchen … ( / oder ⌘K )", "Search … ( / or ⌘K )"),
             "theme" => ("Hell oder dunkel", "Light or dark"),
             "tagline" => (
                 "Mathematik und Recht, formal aufgeschrieben und von der Maschine geprüft. Jeder Begriff erklärt sich \
@@ -485,7 +588,13 @@ impl R<'_> {
     }
 
     fn sources(&self, meta: &Meta) -> String {
-        meta.sources.iter().map(|(s, _)| self.f.source(self.w("source"), s)).collect()
+        meta.sources
+            .iter()
+            .map(|(s, _)| {
+                let url = self.a.citation(self.ws, s).and_then(|c| c.url);
+                self.f.source(self.w("source"), s, url.as_deref())
+            })
+            .collect()
     }
 
     fn row(&self, key: &str, value: &str) -> String {
@@ -664,6 +773,19 @@ impl R<'_> {
                     out += &self.sources(&e.meta);
                 }
                 Item::Unit(u) => out += &self.sources(&u.meta),
+                Item::Document(d) => {
+                    let cites: Vec<String> = d.cites.iter().map(|(c, _)| self.f.mono(c)).collect();
+                    if !cites.is_empty() {
+                        out += &self.row("cite", &cites.join(&self.f.text(" · ")));
+                    }
+                    if let Some((u, _)) = &d.url {
+                        out += &self.row("url", &self.f.link(u, u));
+                    }
+                    if let Some((r, _)) = &d.retrieved {
+                        out += &self.row("retrieved", &self.f.text(r));
+                    }
+                    out += &self.sources(&d.meta);
+                }
                 Item::Record(r) => {
                     let fields: Vec<String> = r
                         .fields
@@ -782,6 +904,31 @@ impl R<'_> {
         out
     }
 
+    /// The kind of a declaration as a key: its modality for a rule that is one, else its kind.
+    fn kind_key(&self, sym: usize) -> &'static str {
+        match self.modality(sym) {
+            Some(m) => m.keyword(),
+            None => self.a.symbols[sym].kind.keyword(),
+        }
+    }
+
+    /// The kind with its symbol, for HTML: hovering it explains the kind (`help_<kind>`); `data-fam` is its family,
+    /// which a frame shows ([`family`]).
+    #[cfg(feature = "html")]
+    fn kind_badge(&self, sym: usize, class: &str) -> String {
+        self.badge(self.kind_key(sym), class)
+    }
+
+    #[cfg(feature = "html")]
+    fn badge(&self, key: &'static str, class: &str) -> String {
+        format!(
+            r##"<span class="{class} kb" data-kind="{key}" data-fam="{}" tabindex="0"><svg class="ki" aria-hidden="true"><use href="#k-{}"></use></svg>{}</span>"##,
+            family(key),
+            icon(key),
+            format::esc(self.w(key))
+        )
+    }
+
     fn kind_word(&self, sym: usize) -> &'static str {
         match self.modality(sym) {
             Some(m) => self.w(m.keyword()),
@@ -809,11 +956,59 @@ impl R<'_> {
     #[cfg(feature = "html")]
     fn card(&self, sym: usize) -> String {
         format!(
-            r#"<div class="kind">{}</div><div class="title">{}</div><div class="id">{}</div>{}"#,
-            self.kind_word(sym),
+            r#"<div>{}</div><div class="title">{}</div><div class="id">{}</div>{}"#,
+            self.kind_badge(sym, "kind"),
             esc(&self.title(sym)),
             esc(&self.a.symbols[sym].id),
             self.body(sym)
         )
     }
 }
+
+/// The family of a kind, which its frame shows: what defines (`def`), what claims (`claim`), a case (`case`), a data
+/// type (`type`), an explanation (`note`), a path (`path`), a document (`doc`).
+pub(crate) fn family(key: &str) -> &'static str {
+    match key {
+        "theorem" | "obligation" | "permission" | "prohibition" => "claim",
+        "example" => "case",
+        "enum" | "value" | "unit" | "record" | "field" => "type",
+        "remark" => "note",
+        "path" => "path",
+        "document" => "doc",
+        _ => "def",
+    }
+}
+
+/// The symbol of a kind: an id in [`assets::SPRITE`].
+pub(crate) fn icon(key: &'static str) -> &'static str {
+    match key {
+        "obligation" | "permission" | "prohibition" => "duty",
+        "concept" | "variant" | "theorem" | "example" | "remark" | "norm" | "input" | "judgement" | "constant"
+        | "rule" | "path" | "enum" | "value" | "unit" | "record" | "field" | "document" => key,
+        _ => "concept",
+    }
+}
+
+/// The kinds in the order the page on how to read explains them.
+pub(crate) const KINDS: &[&str] = &[
+    "concept",
+    "variant",
+    "theorem",
+    "example",
+    "remark",
+    "norm",
+    "input",
+    "judgement",
+    "constant",
+    "rule",
+    "obligation",
+    "permission",
+    "prohibition",
+    "enum",
+    "value",
+    "record",
+    "field",
+    "unit",
+    "path",
+    "document",
+];

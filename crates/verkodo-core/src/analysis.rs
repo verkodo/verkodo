@@ -31,6 +31,8 @@ pub enum SymKind {
     Record,
     /// A field of a record.
     Field,
+    /// A document sources cite.
+    Document,
 }
 
 impl SymKind {
@@ -52,6 +54,7 @@ impl SymKind {
             SymKind::Unit => "unit",
             SymKind::Record => "record",
             SymKind::Field => "field",
+            SymKind::Document => "document",
         }
     }
 
@@ -225,11 +228,100 @@ pub fn analyze(ws: &Sources) -> Analysis {
     a.check_versions(ws);
     a.check_translations(ws);
     a.check_paths(ws);
+    a.check_sources(ws);
     a.diags.sort_by_key(|d| (d.file, d.span.start, d.severity));
     a
 }
 
+/// Where a source leads: the document it cites and, for a § or an article, its number (`§ 19 Abs. 1 UStG` → the
+/// document cited `UStG`, `19`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Citation {
+    pub document: usize,
+    pub number: Option<String>,
+    /// The address: the document's `section` with the number, else its `url`.
+    pub url: Option<String>,
+}
+
 impl Analysis {
+    /// The document a source cites: the `cite` of a document that stands first in the source, as whole words (the
+    /// longer one at the same place); the number is that of the last § or Art. before it.
+    pub fn citation(&self, ws: &Sources, source: &str) -> Option<Citation> {
+        let mut best: Option<(usize, usize, usize)> = None; // (start, -len as order, document)
+        for (sym, s) in self.symbols.iter().enumerate() {
+            let (SymKind::Document, Loc::Item { file, item }) = (s.kind, s.loc) else { continue };
+            let Item::Document(d) = &ws.asts[file].items[item] else { continue };
+            for (cite, _) in &d.cites {
+                if let Some(at) = find_words(source, cite) {
+                    let better = match best {
+                        None => true,
+                        Some((b_at, b_len, _)) => at < b_at || (at == b_at && cite.len() > b_len),
+                    };
+                    if better {
+                        best = Some((at, cite.len(), sym));
+                    }
+                }
+            }
+        }
+        let (at, _, document) = best?;
+        let number = section_number_before(&source[..at]);
+        let Loc::Item { file, item } = self.symbols[document].loc else { return None };
+        let Item::Document(d) = &ws.asts[file].items[item] else { return None };
+        let url = match (&number, &d.section) {
+            (Some(n), Some((pattern, _))) => Some(pattern.replace("{n}", n)),
+            _ => d.url.as_ref().map(|(u, _)| u.clone()),
+        };
+        Some(Citation { document, number, url })
+    }
+
+    fn warn(&mut self, file: usize, span: Span, msg: String) {
+        self.diags.push(Diagnostic::warning(file, span, msg));
+    }
+
+    /// Documents: their addresses and dates are well-formed, and once a workspace has documents, every source cites
+    /// one.
+    fn check_sources(&mut self, ws: &Sources) {
+        let mut any = false;
+        for (file, ast) in ws.asts.iter().enumerate() {
+            for it in &ast.items {
+                let Item::Document(d) = it else { continue };
+                any = true;
+                if d.cites.is_empty() {
+                    self.warn(file, d.name.span, "a document without `cite` – no source can name it".into());
+                }
+                for (u, span) in d.url.iter().chain(&d.section) {
+                    if !u.starts_with("https://") && !u.starts_with("http://") {
+                        self.warn(file, *span, format!("`{u}` is not a web address (https://…)"));
+                    }
+                }
+                if let Some((sec, span)) = &d.section
+                    && !sec.contains("{n}")
+                {
+                    self.warn(file, *span, "a `section` needs `{n}` where the number goes".into());
+                }
+                if let Some((r, span)) = &d.retrieved
+                    && !is_iso_date(r)
+                {
+                    self.warn(file, *span, format!("`{r}` is not a date (YYYY-MM-DD)"));
+                }
+            }
+        }
+        if !any {
+            return;
+        }
+        let mut missing = Vec::new();
+        for (file, ast) in ws.asts.iter().enumerate() {
+            for (text, span) in all_sources(ast) {
+                if self.citation(ws, text).is_none() {
+                    missing.push((file, *span, text.clone()));
+                }
+            }
+        }
+        for (file, span, text) in missing {
+            self.warn(file, span, format!("the source `{text}` cites no document (add a `cite` to one)"));
+        }
+    }
+
     pub fn get(&self, id: &str) -> Option<&Symbol> {
         self.by_id.get(id).map(|&i| &self.symbols[i])
     }
@@ -307,6 +399,7 @@ impl Analysis {
                     Item::Enum(_) => SymKind::Enum,
                     Item::Unit(_) => SymKind::Unit,
                     Item::Record(_) => SymKind::Record,
+                    Item::Document(_) => SymKind::Document,
                 };
                 if self.add(id.clone(), kind, Loc::Item { file, item }, it.name().span).is_none() {
                     continue;
@@ -481,7 +574,7 @@ impl Analysis {
                             self.resolve_path(file, step, &[&m], me);
                         }
                     }
-                    Item::Enum(_) | Item::Unit(_) | Item::Record(_) => {}
+                    Item::Enum(_) | Item::Unit(_) | Item::Record(_) | Item::Document(_) => {}
                 }
             }
         }
@@ -1704,6 +1797,67 @@ impl Analysis {
     }
 }
 
+/// Every source of a file: of the module, its declarations and their parts.
+fn all_sources(ast: &verkodo_syntax::ast::File) -> Vec<&(String, Span)> {
+    let mut out: Vec<&(String, Span)> = ast.meta.sources.iter().collect();
+    for it in &ast.items {
+        out.extend(&it.meta().sources);
+        match it {
+            Item::Concept(c) => c.variants.iter().for_each(|v| out.extend(&v.meta.sources)),
+            Item::Norm(n) => n.members.iter().for_each(|m| out.extend(&m.meta.sources)),
+            Item::Enum(e) => e.values.iter().for_each(|v| out.extend(&v.meta.sources)),
+            Item::Record(r) => r.fields.iter().for_each(|f| out.extend(&f.meta.sources)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Where `words` stands in `text` as whole words (no letter or digit right before or after it).
+fn find_words(text: &str, words: &str) -> Option<usize> {
+    if words.is_empty() {
+        return None;
+    }
+    let mut from = 0;
+    while let Some(i) = text[from..].find(words) {
+        let at = from + i;
+        let end = at + words.len();
+        let before = text[..at].chars().next_back().is_none_or(|c| !c.is_alphanumeric());
+        let after = text[end..].chars().next().is_none_or(|c| !c.is_alphanumeric());
+        if before && after {
+            return Some(at);
+        }
+        from = at + words[..].chars().next().map_or(1, char::len_utf8);
+    }
+    None
+}
+
+/// The number of the last § or article in `text`: `§ 19 Abs. 1` → `19`, `Art. 2` → `2`, `§ 32a` → `32a`.
+fn section_number_before(text: &str) -> Option<String> {
+    let marks = ["§", "Art.", "Artikel", "Article"];
+    let (at, mark) = marks.iter().filter_map(|m| text.rfind(m).map(|i| (i, *m))).max_by_key(|&(i, _)| i)?;
+    let rest = text[at + mark.len()..].trim_start_matches(|c: char| c.is_whitespace() || c == '§');
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let letter = rest[digits.len()..].chars().next().filter(|c| c.is_ascii_lowercase());
+    let after_letter =
+        letter.is_none_or(|l| rest[digits.len() + l.len_utf8()..].chars().next().is_none_or(|c| !c.is_alphanumeric()));
+    Some(match letter {
+        Some(l) if after_letter => format!("{digits}{l}"),
+        _ => digits,
+    })
+}
+
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1739,6 +1893,51 @@ mod tests {
         let Item::Concept(c) = &ws.asts[0].items[0] else { panic!() };
         let frefs = &a.lean_refs[&(0, c.variants[1].def.as_ref().unwrap().span)];
         assert!(frefs.iter().any(|r| r.target == Target::External("Filter.Tendsto".into())));
+    }
+
+    #[test]
+    fn a_source_cites_a_document_and_links_its_section() {
+        let src = r#"module law original de
+document ustg {
+  cite "UStG"
+  url "https://www.gesetze-im-internet.de/ustg_1980/"
+  section "https://www.gesetze-im-internet.de/ustg_1980/__{n}.html"
+  retrieved "2026-11-06"
+}
+document pap { cite "PAP 2026" url "https://example.org/pap.pdf" }
+document book { cite "J. Meeus, Astronomical Algorithms" }
+remark r {
+  source "§ 19 Abs. 1 UStG"
+  source "PAP 2026, MRE4 (§ 19 Abs. 2 EStG)"
+  source "J. Meeus, Astronomical Algorithms (1991)"
+  source "§ 32a EStG"
+  text de "x"
+}"#;
+        let ws = Sources::from_sources(vec![("t.vk".into(), src.into())]);
+        let a = analyze(&ws);
+        let cite = |s: &str| a.citation(&ws, s);
+        let c = cite("§ 19 Abs. 1 UStG").unwrap();
+        assert_eq!(c.number.as_deref(), Some("19"));
+        assert_eq!(c.url.as_deref(), Some("https://www.gesetze-im-internet.de/ustg_1980/__19.html"));
+        // the document that comes first: the plan, not the act in brackets
+        assert_eq!(
+            cite("PAP 2026, MRE4 (§ 19 Abs. 2 EStG)").unwrap().url.as_deref(),
+            Some("https://example.org/pap.pdf")
+        );
+        assert_eq!(cite("J. Meeus, Astronomical Algorithms (1991)").unwrap().url, None, "a book without an address");
+        assert_eq!(cite("§ 32a UStG").unwrap().number.as_deref(), Some("32a"));
+        assert!(cite("UStGB").is_none(), "whole words only");
+        let w = messages(&a, Severity::Warning);
+        assert_eq!(w, ["the source `§ 32a EStG` cites no document (add a `cite` to one)"], "{w:?}");
+    }
+
+    #[test]
+    fn documents_are_checked() {
+        let src = r#"module law original de
+document d { url "ftp://x" section "https://x/" retrieved "6.11.2026" }"#;
+        let ws = Sources::from_sources(vec![("t.vk".into(), src.into())]);
+        let w = messages(&analyze(&ws), Severity::Warning);
+        assert_eq!(w.len(), 4, "{w:?}");
     }
 
     #[test]

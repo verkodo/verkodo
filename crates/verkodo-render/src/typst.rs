@@ -115,8 +115,16 @@ impl Format for Typst {
         format!("#block[{}];\n", self.text(s))
     }
 
-    fn source(&self, word: &str, s: &str) -> String {
-        format!("#src[{}: {}];\n", self.text(word), self.text(s))
+    fn source(&self, word: &str, s: &str, url: Option<&str>) -> String {
+        let s = match url {
+            Some(u) => self.link(s, u),
+            None => self.text(s),
+        };
+        format!("#src[{}: {s}];\n", self.text(word))
+    }
+
+    fn link(&self, text: &str, url: &str) -> String {
+        format!("#link(\"{}\")[{}]", url.replace('\\', "\\\\").replace('"', "\\\""), self.text(text))
     }
 
     fn ordered(&self, items: &[String]) -> String {
@@ -258,7 +266,7 @@ pub fn path_document(
                 out += &f.para(doc);
             }
             if let Some(m) = &n.module {
-                out += &f.source(r.w("declared_in"), m);
+                out += &f.source(r.w("declared_in"), m, None);
             }
             out.push('\n');
         }

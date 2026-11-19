@@ -93,8 +93,16 @@ impl Format for Markdown {
         format!("\n{}\n\n", self.text(s))
     }
 
-    fn source(&self, word: &str, s: &str) -> String {
-        format!("*{}: {}*  \n", self.text(word), self.text(s))
+    fn source(&self, word: &str, s: &str, url: Option<&str>) -> String {
+        let s = match url {
+            Some(u) => self.link(s, u),
+            None => self.text(s),
+        };
+        format!("*{}: {s}*  \n", self.text(word))
+    }
+
+    fn link(&self, text: &str, url: &str) -> String {
+        format!("[{}](<{url}>)", self.text(text))
     }
 
     fn ordered(&self, items: &[String]) -> String {

@@ -28,6 +28,46 @@ pub(crate) struct Layout {
     pub(crate) hrefs: Vec<String>,
     /// For every module, the modules it builds on.
     module_uses: Vec<BTreeSet<usize>>,
+    /// The knowledge as a tree of ids: every prefix of a module's id is a node – an area (`de`), a group (`de.ustg`),
+    /// a module – with a page: the module's article, or an overview.
+    pub(crate) nodes: BTreeMap<String, Node>,
+    /// The areas, the nodes at the top, in order.
+    pub(crate) areas: Vec<String>,
+}
+
+pub(crate) struct Node {
+    pub(crate) id: String,
+    /// The display name: the module's title, else the group's name; an area's comes from the words of the page.
+    pub(crate) title: String,
+    pub(crate) lead: Option<String>,
+    pub(crate) module: Option<usize>,
+    pub(crate) parent: Option<String>,
+    /// In the natural order of their ids (§ 2 before § 19 before § 108).
+    pub(crate) children: Vec<String>,
+    /// The modules at and below the node, and their entries.
+    pub(crate) modules: usize,
+    pub(crate) entries: usize,
+}
+
+/// A key that orders ids naturally: numbers by their value (`p2` < `p19` < `p108`).
+pub(crate) fn natural(id: &str) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let mut text = String::new();
+    let mut num: Option<u64> = None;
+    for c in id.chars() {
+        match (c.to_digit(10), num) {
+            (Some(d), Some(n)) => num = Some(n.saturating_mul(10).saturating_add(d as u64)),
+            (Some(d), None) => num = Some(d as u64),
+            (None, Some(n)) => {
+                out.push((std::mem::take(&mut text), n));
+                num = None;
+                text.push(c);
+            }
+            (None, None) => text.push(c),
+        }
+    }
+    out.push((text, num.unwrap_or(0)));
+    out
 }
 
 pub(crate) struct Module {
@@ -37,8 +77,6 @@ pub(crate) struct Module {
     /// A line under the title (the main declaration, when the title is a section number).
     pub(crate) lead: Option<String>,
     pub(crate) area: String,
-    /// The groups between the area and the module, by their display names.
-    pub(crate) groups: Vec<String>,
     /// The items of the module, the main one first, the others in their order; paths apart.
     pub(crate) items: Vec<usize>,
     pub(crate) paths: Vec<usize>,
@@ -143,7 +181,7 @@ impl Layout {
                 .and_then(|(_, s)| label(s))
                 .or_else(|| paths.first().copied().and_then(label))
                 .or_else(|| items.iter().copied().filter(|&s| a.symbols[s].kind == SymKind::Concept).find_map(label))
-                .or_else(|| items.iter().copied().find_map(label));
+                .or_else(|| items.iter().copied().filter(|&s| a.symbols[s].kind != SymKind::Document).find_map(label));
             let last = segs.last().copied().unwrap_or_default();
             let group_names: Vec<String> =
                 segs.get(1..segs.len().saturating_sub(1)).unwrap_or_default().iter().map(|s| display(s)).collect();
@@ -173,7 +211,6 @@ impl Layout {
                 title,
                 lead,
                 area: segs.first().copied().unwrap_or_default().to_string(),
-                groups: group_names,
                 items,
                 paths,
             });
@@ -205,7 +242,61 @@ impl Layout {
                 }
             }
         }
-        Layout { modules, module_of_file, uses, used_by, hrefs, module_uses }
+        let mut nodes: BTreeMap<String, Node> = BTreeMap::new();
+        for (i, m) in modules.iter().enumerate() {
+            let segs: Vec<&str> = m.id.split('.').collect();
+            for depth in 1..=segs.len() {
+                let id = segs[..depth].join(".");
+                let node = nodes.entry(id.clone()).or_insert_with(|| Node {
+                    id: id.clone(),
+                    title: display(segs[depth - 1]),
+                    lead: None,
+                    module: None,
+                    parent: (depth > 1).then(|| segs[..depth - 1].join(".")),
+                    children: Vec::new(),
+                    modules: 0,
+                    entries: 0,
+                });
+                node.modules += 1;
+                node.entries += m.items.len();
+                if depth == segs.len() {
+                    node.module = Some(i);
+                    node.title = m.title.clone();
+                    node.lead = m.lead.clone();
+                }
+            }
+        }
+        let links: Vec<(String, String)> =
+            nodes.values().filter_map(|n| n.parent.clone().map(|p| (p, n.id.clone()))).collect();
+        for (parent, child) in links {
+            if let Some(p) = nodes.get_mut(&parent) {
+                p.children.push(child);
+            }
+        }
+        for n in nodes.values_mut() {
+            n.children.sort_by_key(|c| natural(c));
+        }
+        let mut areas: Vec<String> = nodes.values().filter(|n| n.parent.is_none()).map(|n| n.id.clone()).collect();
+        areas.sort_by_key(|a| natural(a));
+        Layout { modules, module_of_file, uses, used_by, hrefs, module_uses, nodes, areas }
+    }
+
+    /// A node and those above it, from its area down; for an id below the nodes (a path's page) the nearest node.
+    pub(crate) fn chain(&self, id: &str) -> Vec<&Node> {
+        let mut out = Vec::new();
+        let mut key = id;
+        while !self.nodes.contains_key(key)
+            && let Some((up, _)) = key.rsplit_once('.')
+        {
+            key = up;
+        }
+        let mut at = self.nodes.get(key);
+        while let Some(n) = at {
+            out.push(n);
+            at = n.parent.as_ref().and_then(|p| self.nodes.get(p));
+        }
+        out.reverse();
+        out
     }
 
     fn module_of(&self, a: &Analysis, sym: usize) -> Option<&Module> {
@@ -276,8 +367,17 @@ impl<'a> R<'a> {
             "rule_default",
             "close",
             "unless",
+            "more",
+            "how_to_read",
+            "document",
+            "all_kinds",
+            "group",
         ];
-        let pairs: Vec<String> = keys.iter().map(|k| format!("\"{k}\":\"{}\"", json_esc(self.w(k)))).collect();
+        let mut pairs: Vec<String> = keys.iter().map(|k| format!("\"{k}\":\"{}\"", json_esc(self.w(k)))).collect();
+        for k in crate::KINDS {
+            let help = format!("help_{k}");
+            pairs.push(format!("\"{help}\":\"{}\"", json_esc(self.w(&help))));
+        }
         format!("{{{}}}", pairs.join(","))
     }
 
@@ -414,9 +514,27 @@ impl<'a> R<'a> {
                 )
             })
             .collect();
+        // the pages of areas and groups, found like declarations
+        let mut search = search;
+        for n in l.nodes.values().filter(|n| n.module.is_none()) {
+            let place = n.parent.as_ref().map(|p| self.node_title(&l.nodes[p])).unwrap_or_default();
+            search.push(format!(
+                "[\"{}\",\"{}\",\"group\",\"{}.html\",\"{}\"]",
+                json_esc(&n.id),
+                json_esc(&self.node_title(n)),
+                json_esc(&n.id),
+                json_esc(&place)
+            ));
+        }
+        let areas: Vec<String> = l
+            .areas
+            .iter()
+            .map(|a| format!("\"{}\":\"{}\"", json_esc(a), json_esc(&self.node_title(&l.nodes[a]))))
+            .collect();
         let cards = if cards { format!("\"cards\":{},", self.cards_json()) } else { String::new() };
         format!(
-            "{{{cards}\"search\":[{}],\"calc\":{calc},\"forms\":{},\"words\":{}}}",
+            "{{{cards}\"areas\":{{{}}},\"search\":[{}],\"calc\":{calc},\"forms\":{},\"words\":{}}}",
+            areas.join(","),
             search.join(","),
             self.forms_json(),
             self.words_json()
@@ -474,57 +592,226 @@ impl<'a> R<'a> {
 
     // ---- the frame of every page ----
 
-    fn tree(&self, l: &Layout, here: Option<&str>) -> String {
-        // area → groups → modules, in the order of their ids
-        let mut areas: BTreeMap<&str, BTreeMap<Vec<String>, Vec<&Module>>> = BTreeMap::new();
-        for m in &l.modules {
-            let key = m.groups.iter().map(|g| g.to_lowercase()).collect();
-            areas.entry(m.area.as_str()).or_default().entry(key).or_default().push(m);
+    /// The name of a node: an area's from the words of the page, unless a module of its own names it.
+    pub(crate) fn node_title(&self, n: &Node) -> String {
+        if n.parent.is_none() && n.module.is_none() { self.area_name(&n.id) } else { n.title.clone() }
+    }
+
+    fn node_link(&self, n: &Node, class: &str) -> String {
+        let name = match &n.lead {
+            Some(lead) if n.module.is_some() => format!("{} · {lead}", n.title),
+            _ => self.node_title(n),
+        };
+        format!(
+            r#"<a class="{class}" href="{id}.html" data-page="{id}" title="{id}"><span>{}</span><span class="seen">●</span></a>"#,
+            esc(&name),
+            id = esc(&n.id)
+        )
+    }
+
+    /// The side: not the whole tree – at a thousand pages that would be a thousand links on each – but the branch of
+    /// the page: the nodes above it, its siblings (a window around it, when there are many) and its children.
+    fn side(&self, l: &Layout, here: Option<&str>) -> String {
+        const WINDOW: usize = 12;
+        const CHILDREN: usize = 40;
+        let mut out = String::from(r#"<div class="areas-m">"#);
+        out.push_str(&self.areas_nav(l, here));
+        out.push_str(r#"</div><ul class="tree">"#);
+        let chain = here.map(|h| l.chain(h)).unwrap_or_default();
+        if chain.is_empty() {
+            for a in &l.areas {
+                let _ = write!(out, "<li>{}</li>", self.node_link(&l.nodes[a], ""));
+            }
+            out.push_str("</ul>");
+            return out;
         }
-        let mut out = String::from(r#"<ul class="tree">"#);
-        for (area, groups) in &areas {
-            let open = groups.values().flatten().any(|m| Some(m.id.as_str()) == here) || here == Some("index");
-            let _ = write!(
-                out,
-                r#"<li><details{}><summary>{}</summary><ul>"#,
-                if open { " open" } else { "" },
-                esc(&self.area_name(area))
-            );
-            for mods in groups.values() {
-                let groups = &mods[0].groups;
-                let leaves: String = mods
-                    .iter()
-                    .map(|m| {
-                        let cls = if Some(m.id.as_str()) == here { " here" } else { "" };
-                        let name = match &m.lead {
-                            Some(lead) => format!("{} · {lead}", m.title),
-                            None => m.title.clone(),
-                        };
-                        format!(
-                            r#"<li><a class="{cls}" href="{}.html" data-page="{}" title="{}"><span>{}</span><span class="seen">●</span></a></li>"#,
-                            esc(&m.id),
-                            esc(&m.id),
-                            esc(&m.id),
-                            esc(&name)
-                        )
-                    })
-                    .collect();
-                if groups.is_empty() {
-                    out.push_str(&leaves);
+        let children = |n: &Node| -> String {
+            if n.children.is_empty() {
+                return String::new();
+            }
+            let mut ul = String::from("<ul>");
+            for c in n.children.iter().take(CHILDREN) {
+                let _ = write!(ul, "<li>{}</li>", self.node_link(&l.nodes[c], ""));
+            }
+            if n.children.len() > CHILDREN {
+                let _ = write!(
+                    ul,
+                    r#"<li><a class="more" href="{}.html">… {} {}</a></li>"#,
+                    esc(&n.id),
+                    n.children.len(),
+                    esc(self.w("all_items"))
+                );
+            }
+            ul.push_str("</ul>");
+            ul
+        };
+        let last = chain.len() - 1;
+        // from the area down to the parent of the page: one link each, nested
+        let mut close = 0;
+        for n in &chain[..last.saturating_sub(1)] {
+            let _ = write!(out, r#"<li class="up">{}<ul>"#, self.node_link(n, "anc"));
+            close += 1;
+        }
+        let me = chain[last];
+        if last == 0 {
+            let _ = write!(out, "<li>{}{}</li>", self.node_link(me, "here"), children(me));
+        } else {
+            let parent = chain[last - 1];
+            let _ = write!(out, r#"<li class="up">{}<ul>"#, self.node_link(parent, "anc"));
+            let sibs = &parent.children;
+            let at = sibs.iter().position(|c| *c == me.id).unwrap_or(0);
+            let (from, to) = if sibs.len() > 2 * WINDOW + 1 {
+                let from = at.saturating_sub(WINDOW).min(sibs.len() - (2 * WINDOW + 1));
+                (from, from + 2 * WINDOW + 1)
+            } else {
+                (0, sibs.len())
+            };
+            let gap = |n: usize| {
+                format!(
+                    r#"<li><a class="more" href="{}.html">… {n} {}</a></li>"#,
+                    esc(&parent.id),
+                    esc(self.w("more_items"))
+                )
+            };
+            if from > 0 {
+                out.push_str(&gap(from));
+            }
+            for c in &sibs[from..to] {
+                let n = &l.nodes[c];
+                if n.id == me.id {
+                    let _ = write!(out, "<li>{}{}</li>", self.node_link(n, "here"), children(n));
                 } else {
-                    let open = mods.iter().any(|m| Some(m.id.as_str()) == here);
-                    let _ = write!(
-                        out,
-                        r#"<li class="group"><details{}><summary>{}</summary><ul>{leaves}</ul></details></li>"#,
-                        if open { " open" } else { "" },
-                        esc(&groups.join(" › "))
-                    );
+                    let _ = write!(out, "<li>{}</li>", self.node_link(n, ""));
                 }
             }
-            out.push_str("</ul></details></li>");
+            if to < sibs.len() {
+                out.push_str(&gap(sibs.len() - to));
+            }
+            out.push_str("</ul></li>");
+        }
+        for _ in 0..close {
+            out.push_str("</ul></li>");
         }
         out.push_str("</ul>");
         out
+    }
+
+    /// The areas as tabs: at the top on wide screens, in the drawer on narrow ones.
+    fn areas_nav(&self, l: &Layout, here: Option<&str>) -> String {
+        let area = here.and_then(|h| l.chain(h).first().map(|n| n.id.clone()));
+        l.areas
+            .iter()
+            .map(|a| {
+                let on = if area.as_deref() == Some(a.as_str()) { r#" class="on" aria-current="true""# } else { "" };
+                format!(r#"<a href="{}.html"{on}>{}</a>"#, esc(a), esc(&self.node_title(&l.nodes[a])))
+            })
+            .collect()
+    }
+
+    /// Home › area › … › the node above: each a link to its page.
+    pub(crate) fn crumbs(&self, l: &Layout, id: &str, inline: bool) -> String {
+        let chain = l.chain(id);
+        let mut parts: Vec<String> = Vec::new();
+        if !inline {
+            parts.push(format!(r#"<a href="index.html">{}</a>"#, esc(self.w("home"))));
+        }
+        for n in &chain[..chain.len().saturating_sub(1)] {
+            if inline {
+                parts.push(esc(&self.node_title(n)));
+            } else {
+                parts.push(format!(r#"<a href="{}.html">{}</a>"#, esc(&n.id), esc(&self.node_title(n))));
+            }
+        }
+        format!(r#"<nav class="crumbs">{}</nav>"#, parts.join(" › "))
+    }
+
+    /// The children of a node as tiles: what each is, how much is below it.
+    fn child_tiles(&self, l: &Layout, n: &Node) -> String {
+        let mut out = String::from(r#"<div class="grid">"#);
+        for c in &n.children {
+            let c = &l.nodes[c];
+            let lead = match (&c.lead, c.module) {
+                (Some(lead), Some(_)) => format!("<p>{}</p>", esc(lead)),
+                _ => String::new(),
+            };
+            let below = if c.children.is_empty() {
+                format!("{} {}", c.entries, esc(self.w("entries")))
+            } else {
+                format!("{} {} · {} {}", c.modules, esc(self.w("articles")), c.entries, esc(self.w("entries")))
+            };
+            let _ = write!(
+                out,
+                r#"<a class="tile" href="{}.html" data-page="{}"><h3>{}</h3>{lead}<div class="stat"><span>{below}</span></div></a>"#,
+                esc(&c.id),
+                esc(&c.id),
+                esc(&self.node_title(c))
+            );
+        }
+        out.push_str("</div>");
+        out
+    }
+
+    /// The page on how to read: every kind with its symbol, its frame, what it is and one of its kind here.
+    pub(crate) fn how_to_read(&self, l: &Layout, site_title: &str) -> String {
+        let title = self.w("how_to_read");
+        let mut main = format!(
+            r#"<nav class="crumbs"><a href="index.html">{}</a></nav><h1>{}</h1><p class="lead">{}</p><p>{}</p><p>{}</p><div class="kinds">"#,
+            esc(self.w("home")),
+            esc(title),
+            esc(self.w("how_intro")),
+            esc(self.w("how_frames")),
+            esc(self.w("how_lean"))
+        );
+        for &k in crate::KINDS {
+            let example = (0..self.a.symbols.len()).find(|&s| self.kind_key(s) == k);
+            let example = example
+                .map(|s| {
+                    format!(
+                        r#"<div class="ex">{}: <a class="ref" href="{}" data-ref="{}">{}</a></div>"#,
+                        esc(self.w("example_of_kind")),
+                        esc(&l.hrefs[s]),
+                        esc(&self.a.symbols[s].id),
+                        esc(&self.title(s))
+                    )
+                })
+                .unwrap_or_default();
+            let _ = write!(
+                main,
+                r#"<section class="decl fam-{fam}" id="kind-{k}"><header>{badge}</header><p>{help}</p>{example}</section>"#,
+                fam = crate::family(k),
+                badge = self.badge(k, "chip kind-tag"),
+                help = esc(self.w(&format!("help_{k}"))),
+            );
+        }
+        main.push_str("</div>");
+        self.frame(l, false, site_title, title, "how-to-read", "", &main, "", "")
+    }
+
+    /// The page of a node without a module of its own: an area or a group – what is in it, and its paths.
+    pub(crate) fn overview(&self, l: &Layout, n: &Node, site_title: &str) -> String {
+        let title = self.node_title(n);
+        let mut main = self.crumbs(l, &n.id, false);
+        let _ = write!(
+            main,
+            r#"<h1>{}</h1><div class="meta"><span class="chip">{} {}</span><span class="chip">{} {}</span></div>"#,
+            esc(&title),
+            n.modules,
+            esc(self.w("articles")),
+            n.entries,
+            esc(self.w("entries"))
+        );
+        main.push_str(&self.child_tiles(l, n));
+        let prefix = format!("{}.", n.id);
+        let paths: Vec<usize> =
+            l.modules.iter().filter(|m| m.id.starts_with(&prefix)).flat_map(|m| m.paths.iter().copied()).collect();
+        if !paths.is_empty() {
+            let _ = write!(main, r#"<p class="section-title">{}</p><div class="grid">"#, esc(self.w("paths")));
+            for p in paths {
+                main.push_str(&self.path_tile(l, p));
+            }
+            main.push_str("</div>");
+        }
+        self.frame(l, false, site_title, &title, &n.id, "", &main, "", "")
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -556,7 +843,7 @@ impl<'a> R<'a> {
         let side = if inline {
             String::new()
         } else {
-            format!(r#"<nav class="side" id="side">{}</nav>"#, self.tree(l, Some(page)))
+            format!(r#"<nav class="side" id="side">{}</nav>"#, self.side(l, (page != "index").then_some(page)))
         };
         let layout = match (inline, rail.is_empty()) {
             (true, _) => r#"<div class="layout wide" style="grid-template-columns:minmax(0,1fr)">"#.to_string(),
@@ -587,7 +874,8 @@ impl<'a> R<'a> {
 {head}
 </head>
 <body data-page="{page}" {body_attrs}>
-<header class="top">{menu}<a class="brand" href="index.html">{brand}</a><div class="search"><input type="search" id="q" placeholder="{search}" autocomplete="off" aria-label="{search}"><div class="results" id="results" hidden></div></div><button class="icon" id="theme" aria-label="{theme}" title="{theme}">◐</button></header>
+{sprite}
+<header class="top">{menu}<a class="brand" href="index.html">{brand}</a>{areas}<div class="search"><input type="search" id="q" placeholder="{search}" autocomplete="off" aria-label="{search}"><div class="results" id="results" hidden></div></div>{help}<button class="icon" id="theme" aria-label="{theme}" title="{theme}">◐</button></header>
 {layout}{side}<main class="content {main_class}">{main}</main>{rail}</div>
 {script}
 </body>
@@ -596,6 +884,20 @@ impl<'a> R<'a> {
             lang = esc(self.lang),
             title = esc(&if title == site_title { title.to_string() } else { format!("{title} – {site_title}") }),
             page = esc(page),
+            sprite = assets::SPRITE,
+            areas = if inline {
+                String::new()
+            } else {
+                format!(r#"<nav class="areas">{}</nav>"#, self.areas_nav(l, (page != "index").then_some(page)))
+            },
+            help = if inline {
+                String::new()
+            } else {
+                format!(
+                    r#"<a class="icon" href="how-to-read.html" aria-label="{0}" title="{0}">?</a>"#,
+                    esc(self.w("how_to_read"))
+                )
+            },
             search = esc(self.w("search")),
             theme = esc(self.w("theme")),
         )
@@ -607,10 +909,10 @@ impl<'a> R<'a> {
         let steps = self.path_steps(p).len();
         let place = l.module_of(self.a, p).map(|m| m.title.clone()).unwrap_or_default();
         format!(
-            r#"<a class="tile" href="{href}" data-progress="{id}" data-steps="{steps}"><span class="chip kind-tag">{kind}</span><h3>{label}</h3><p>{steps} {steps_word} · {place}</p><div class="bar"><span></span></div><div class="stat"><span class="count"></span></div></a>"#,
+            r#"<a class="tile fam-path" href="{href}" data-progress="{id}" data-steps="{steps}">{kind}<h3>{label}</h3><p>{steps} {steps_word} · {place}</p><div class="bar"><span></span></div><div class="stat"><span class="count"></span></div></a>"#,
             href = esc(&l.hrefs[p]),
             id = esc(&self.a.symbols[p].id),
-            kind = esc(self.w("path")),
+            kind = self.kind_badge(p, "chip kind-tag"),
             label = esc(&self.label(p)),
             steps_word = esc(self.w("steps")),
             place = esc(&place),
@@ -631,29 +933,50 @@ impl<'a> R<'a> {
             }
             main.push_str("</div>");
         }
-        let mut areas: BTreeMap<&str, Vec<&Module>> = BTreeMap::new();
-        for m in &l.modules {
-            areas.entry(m.area.as_str()).or_default().push(m);
-        }
         let _ = write!(main, r#"<p class="section-title">{}</p><div class="grid">"#, esc(self.w("areas")));
-        for (area, mods) in &areas {
-            let n: usize = mods.iter().map(|m| m.items.len()).sum();
+        for a in &l.areas {
+            let n = &l.nodes[a];
+            let href = |id: &str| if inline { format!("#m-{id}") } else { format!("{id}.html") };
             let _ = write!(
                 main,
                 r#"<div class="tile"><h3>{}</h3><div class="stat"><span>{} {}</span><span>{} {}</span></div><ul>"#,
-                esc(&self.area_name(area)),
-                mods.len(),
+                if inline {
+                    esc(&self.node_title(n))
+                } else {
+                    format!(r#"<a href="{}">{}</a>"#, esc(&href(&n.id)), esc(&self.node_title(n)))
+                },
+                n.modules,
                 esc(self.w("articles")),
-                n,
+                n.entries,
                 esc(self.w("entries"))
             );
-            for m in mods {
-                let href = if inline { format!("#m-{}", m.id) } else { format!("{}.html", m.id) };
-                let name = match &m.lead {
-                    Some(lead) => format!("{} · {lead}", m.title),
-                    None => m.title.clone(),
+            const SHOWN: usize = 8;
+            for c in n.children.iter().take(SHOWN) {
+                let c = &l.nodes[c];
+                // on a single page, groups have no anchor of their own: their first module stands for them
+                let target = if inline {
+                    let mut at = c;
+                    while at.module.is_none() && !at.children.is_empty() {
+                        at = &l.nodes[&at.children[0]];
+                    }
+                    href(&at.id)
+                } else {
+                    href(&c.id)
                 };
-                let _ = write!(main, r#"<li><a href="{}">{}</a></li>"#, esc(&href), esc(&name));
+                let name = match (&c.lead, c.module) {
+                    (Some(lead), Some(_)) => format!("{} · {lead}", c.title),
+                    _ => self.node_title(c),
+                };
+                let _ = write!(main, r#"<li><a href="{}">{}</a></li>"#, esc(&target), esc(&name));
+            }
+            if n.children.len() > SHOWN && !inline {
+                let _ = write!(
+                    main,
+                    r#"<li><a href="{}">… {} {}</a></li>"#,
+                    esc(&href(&n.id)),
+                    n.children.len() - SHOWN,
+                    esc(self.w("more_items"))
+                );
             }
             main.push_str("</ul></div>");
         }
@@ -714,10 +1037,10 @@ impl<'a> R<'a> {
             let body = self.body(s);
             let _ = write!(
                 out,
-                r#"<details class="part" id="{id}"{open}><summary><span class="kind">{kind}</span><span>{title}</span><span class="id">{id}</span></summary><div class="body">{body}</div></details>"#,
+                r#"<details class="part" id="{id}"{open}><summary>{kind}<span>{title}</span><span class="id">{id}</span></summary><div class="body">{body}</div></details>"#,
                 id = esc(&self.a.symbols[s].id),
                 open = if open { " open" } else { "" },
-                kind = esc(self.kind_word(s)),
+                kind = self.kind_badge(s, "kind"),
                 title = esc(&self.label(s)),
             );
         }
@@ -726,12 +1049,8 @@ impl<'a> R<'a> {
     }
 
     fn article_main(&self, l: &Layout, m: &Module, inline: bool) -> String {
-        let mut main = String::new();
-        let crumbs: Vec<String> =
-            std::iter::once(self.area_name(&m.area)).chain(m.groups.iter().cloned()).map(|c| esc(&c)).collect();
-        let home =
-            if inline { String::new() } else { format!(r#"<a href="index.html">{}</a> › "#, esc(self.w("home"))) };
-        let _ = write!(main, r#"<div class="crumbs">{home}{}</div><h1>{}</h1>"#, crumbs.join(" › "), esc(&m.title));
+        let mut main = self.crumbs(l, &m.id, inline);
+        let _ = write!(main, "<h1>{}</h1>", esc(&m.title));
         if let Some(lead) = &m.lead {
             let _ = write!(main, r#"<p class="lead">{}</p>"#, esc(lead));
         }
@@ -753,9 +1072,10 @@ impl<'a> R<'a> {
         for &s in &m.items {
             let _ = write!(
                 main,
-                r#"<section class="decl" id="{id}"><header><span class="chip kind-tag">{kind}</span><h2>{title}</h2><span class="id">{id}</span></header>{body}{calc}{parts}{uses}{used}</section>"#,
+                r#"<section class="decl fam-{fam}" id="{id}"><header>{kind}<h2>{title}</h2><span class="id">{id}</span></header>{body}{calc}{parts}{uses}{used}</section>"#,
                 id = esc(&self.a.symbols[s].id),
-                kind = esc(self.kind_word(s)),
+                kind = self.kind_badge(s, "chip kind-tag"),
+                fam = crate::family(self.kind_key(s)),
                 title = esc(&self.title(s)),
                 body = self.body_with(s, true),
                 calc = if self.a.symbols[s].kind == SymKind::Norm {
@@ -767,6 +1087,18 @@ impl<'a> R<'a> {
                 parts = self.parts(s),
                 uses = self.links_row(l, "builds_on", &l.uses[s]),
                 used = self.links_row(l, "used_by", &l.used_by[s]),
+            );
+        }
+        // a module that is also a group (`de.ustg` above `de.ustg.p19`): what is in it
+        if !inline
+            && let Some(n) = l.nodes.get(&m.id)
+            && !n.children.is_empty()
+        {
+            let _ = write!(
+                main,
+                r#"<p class="section-title" id="contents">{}</p>{}"#,
+                esc(self.w("contents")),
+                self.child_tiles(l, n)
             );
         }
         main
@@ -1011,11 +1343,11 @@ impl<'a> R<'a> {
         }
         let _ = write!(
             main,
-            r#"<h1>{}</h1><div class="progress" data-progress="{}" data-steps="{}"><span class="chip kind-tag">{}</span><span>{} {}</span><div class="bar"><span></span></div><span class="count"></span></div><p class="hint">{}</p>"#,
+            r#"<h1>{}</h1><div class="progress" data-progress="{}" data-steps="{}">{}<span>{} {}</span><div class="bar"><span></span></div><span class="count"></span></div><p class="hint">{}</p>"#,
             esc(&title),
             esc(id),
             steps.len(),
-            esc(self.w("path")),
+            self.kind_badge(path, "chip kind-tag"),
             steps.len(),
             esc(self.w("steps")),
             esc(self.w("hint"))
@@ -1028,9 +1360,10 @@ impl<'a> R<'a> {
             };
             let _ = write!(
                 main,
-                r#"<section class="decl step" id="step-{num}"><header><span class="num">{num}</span><span class="chip kind-tag">{kind}</span><h2>{title}</h2></header>{body}<div class="step-foot"><button class="btn got" type="button" aria-pressed="false">✓ {got}</button><a class="btn" href="{href}" data-ref="{sid}">{context}</a>{next}</div></section>"#,
+                r#"<section class="decl step fam-{fam}" id="step-{num}"><header><span class="num">{num}</span>{kind}<h2>{title}</h2></header>{body}<div class="step-foot"><button class="btn got" type="button" aria-pressed="false">✓ {got}</button><a class="btn" href="{href}" data-ref="{sid}">{context}</a>{next}</div></section>"#,
                 num = n + 1,
-                kind = esc(self.kind_word(s)),
+                kind = self.kind_badge(s, "chip kind-tag"),
+                fam = crate::family(self.kind_key(s)),
                 title = esc(&self.title(s)),
                 body = self.body(s) + &self.in_path(s, path),
                 got = esc(self.w("understood_btn")),
@@ -1107,6 +1440,33 @@ mod tests {
     }
 
     #[test]
+    fn ids_sort_naturally() {
+        let mut ids = vec!["p108", "p19", "p2", "a10", "a9"];
+        ids.sort_by_key(|i| natural(i));
+        assert_eq!(ids, ["a9", "a10", "p2", "p19", "p108"]);
+    }
+
+    #[test]
+    fn the_side_shows_the_branch_and_a_window_of_many_siblings() {
+        // forty sections of one act: the side of § 20 shows the act, a window around § 20 and links to the rest
+        let files: Vec<(String, String)> = (1..=40)
+            .map(|i| (format!("p{i}.vk"), format!("module law.act.p{i} original en\nremark r {{ text en \"x\" }}")))
+            .collect();
+        let ws = Sources::from_sources(files);
+        let a = verkodo_core::analyze(&ws);
+        let l = Layout::new(&ws, &a, "en", false);
+        assert_eq!(l.nodes["law.act"].children.len(), 40);
+        assert_eq!(l.nodes["law.act"].children[1], "law.act.p2", "natural order");
+        let f = crate::format::Html::default();
+        let r = R { ws: &ws, a: &a, report: None, lang: "en", f: &f };
+        let side = r.side(&l, Some("law.act.p20"));
+        assert!(side.contains(r#"class="here" href="law.act.p20.html""#));
+        assert!(side.contains("law.act.p8.html") && side.contains("law.act.p32.html"), "{side}");
+        assert!(!side.contains("law.act.p3.html") && !side.contains("law.act.p40.html"), "{side}");
+        assert_eq!(side.matches(r#"class="more""#).count(), 2, "{side}");
+    }
+
+    #[test]
     fn a_module_with_its_own_label_is_headed_by_it() {
         let src = r#"module law.vertrag.a2 original de, en {
               label de "Art. 2 Vertrag"
@@ -1120,7 +1480,7 @@ mod tests {
         let de = Layout::new(&ws, &a, "de", false);
         assert_eq!(de.modules[0].title, "Art. 2 Vertrag");
         assert_eq!(de.modules[0].lead.as_deref(), Some("Feiertag"));
-        assert_eq!(de.modules[0].groups, ["Vertrag"], "the module's source names the group");
+        assert_eq!(de.nodes["law.vertrag"].title, "Vertrag", "the module's source names the group");
         assert_eq!(Layout::new(&ws, &a, "fr", false).modules[0].title, "Art. 2 Treaty", "English is the fallback");
     }
 
@@ -1155,7 +1515,7 @@ mod tests {
         assert!(!data.contains(r#""cards":"#), "the cards are not in data.js");
         let cards = std::fs::read_to_string(dir.join("assets/cards.js")).unwrap();
         assert!(cards.starts_with("window.VK_CARDS={") && cards.contains(r#"data-ref=\"law.act.p1.tax.due\""#));
-        assert!(!cards.contains("href="), "{cards}");
+        assert!(!cards.contains(r#"<a class=\"ref\" href"#), "a link in a card carries only its id: {cards}");
         let sources = std::fs::read_to_string(dir.join("assets/sources.js")).unwrap();
         assert!(sources.contains(r#""path":"0.vk""#) && !sources.contains("p1.vk"), "{sources}");
         assert!(article.contains(r#"class="calc" data-norm="law.act.p1.tax""#));
@@ -1163,6 +1523,19 @@ mod tests {
         let home = std::fs::read_to_string(dir.join("index.html")).unwrap();
         assert!(home.contains(r#"data-node="1" data-uses="0""#), "{home}");
         assert!(article.contains(r#"class="hood""#) && article.contains(r#"<a class="node" href="law.act.p2.html">"#));
+        // the page on how to read, an overview for every group without a module, the branch on the side
+        for want in ["how-to-read.html", "law.html", "law.act.html"] {
+            assert!(names.iter().any(|n| n == want), "{want} missing in {names:?}");
+        }
+        let overview = std::fs::read_to_string(dir.join("law.act.html")).unwrap();
+        assert!(overview.contains(r#"<a class="tile" href="law.act.p1.html""#), "{overview}");
+        assert!(article.contains(r#"<nav class="areas"><a href="law.html" class="on""#), "the area as a tab");
+        assert!(
+            article.contains(r#"<a class="here" href="law.act.p1.html""#)
+                && article.contains(r#"href="law.act.p2.html""#)
+        );
+        assert!(article.contains(r#"class="decl fam-def""#) && article.contains(r#"data-kind="norm""#));
+        assert!(article.contains(r#"<symbol id="k-norm""#), "the symbols are on the page");
         std::fs::remove_dir_all(&dir).unwrap();
         let single = crate::index_html(&ws, &a, None, "en");
         assert_eq!(single.matches("<style").count(), 1);

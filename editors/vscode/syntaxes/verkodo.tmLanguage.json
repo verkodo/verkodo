@@ -103,7 +103,7 @@
       "comment": "`label`, `text`, `criteria` and a language, or `source`: text in quotes, or without them to the end of the line.",
       "patterns": [
         {
-          "begin": "\\b(?:(label|text|criteria)\\s+([a-z]{2})|(source))\\s*(?=\")",
+          "begin": "\\b(?:(label|text|criteria)\\s+([a-z]{2})|(source|cite|url|section|retrieved))\\s*(?=\")",
           "beginCaptures": {
             "1": {
               "name": "keyword.other.verkodo"
@@ -123,7 +123,7 @@
           ]
         },
         {
-          "match": "\\b(?:(label|text|criteria)\\s+([a-z]{2})|(source))\\s+([^\\s\"].*)$",
+          "match": "\\b(?:(label|text|criteria)\\s+([a-z]{2})|(source|cite|url|section|retrieved))\\s+([^\\s\"].*)$",
           "captures": {
             "1": {
               "name": "keyword.other.verkodo"
@@ -153,7 +153,7 @@
       ]
     },
     "declaration": {
-      "match": "\\b(module|translation|concept|variant|theorem|example|remark|path|norm|input|judgement|constant|rule|obligation|permission|prohibition|enum|value|unit|record|field)\\s+([\\p{L}_][\\p{L}\\p{N}_.]*)",
+      "match": "\\b(module|translation|concept|variant|theorem|example|remark|path|norm|input|judgement|constant|rule|obligation|permission|prohibition|enum|value|unit|record|field|document)\\s+([\\p{L}_][\\p{L}\\p{N}_.]*)",
       "captures": {
         "1": {
           "name": "keyword.declaration.verkodo"

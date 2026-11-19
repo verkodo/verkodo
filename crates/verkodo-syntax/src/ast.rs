@@ -79,6 +79,7 @@ pub enum Item {
     Enum(EnumDecl),
     Unit(UnitDecl),
     Record(RecordDecl),
+    Document(DocumentDecl),
 }
 
 impl Item {
@@ -92,6 +93,7 @@ impl Item {
             Item::Enum(x) => &x.name,
             Item::Unit(x) => &x.name,
             Item::Record(x) => &x.name,
+            Item::Document(x) => &x.name,
         }
     }
 
@@ -105,6 +107,7 @@ impl Item {
             Item::Enum(x) => &x.meta,
             Item::Unit(x) => &x.meta,
             Item::Record(x) => &x.meta,
+            Item::Document(x) => &x.meta,
         }
     }
 }
@@ -231,6 +234,20 @@ pub struct EnumValue {
 pub struct UnitDecl {
     pub name: Name,
     pub meta: Meta,
+    pub span: Span,
+}
+
+/// A document sources cite – an act, a circular, a book: how sources name it (`cite "UStG"`), where it is
+/// (`url`), where one of its sections is (`section "…/__{n}.html"`, `{n}` the number after § or Art.) and when it
+/// was read (`retrieved "2026-11-06"`). A source that names it links there.
+#[derive(Clone, Debug)]
+pub struct DocumentDecl {
+    pub name: Name,
+    pub meta: Meta,
+    pub cites: Vec<(String, Span)>,
+    pub url: Option<(String, Span)>,
+    pub section: Option<(String, Span)>,
+    pub retrieved: Option<(String, Span)>,
     pub span: Span,
 }
 

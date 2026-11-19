@@ -426,6 +426,7 @@ fn symbol_kind(kind: SymKind) -> u32 {
         SymKind::Unit => 26,                       // TypeParameter
         SymKind::Record => 23,                     // Struct
         SymKind::Field => 8,                       // Field
+        SymKind::Document => 1,                    // File
     }
 }
 

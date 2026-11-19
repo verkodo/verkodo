@@ -97,6 +97,12 @@ code, .lean, .mono { font-family: var(--mono); font-size: .8em; }
   text-overflow: ellipsis; max-width: 45%; }
 .results a.on, .results a:hover { background: var(--mark); }
 .results .none { padding: 10px; color: var(--faint); font-size: 14px; }
+.results .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 4px 8px; border-bottom: 1px solid var(--line);
+  margin-bottom: 4px; }
+.results .filters .chip { cursor: pointer; background: none; color: var(--muted); }
+.results .filters .chip.on { color: var(--text); border-color: var(--titan); background: var(--mark); }
+.results .filters .n { color: var(--faint); }
+.results .filters .sep { flex-basis: 100%; height: 0; }
 .icon { font: 16px var(--sans); color: var(--muted); background: none; border: 1px solid var(--line);
   border-radius: 6px; width: 36px; height: 36px; cursor: pointer; }
 .icon:hover { color: var(--text); border-color: var(--titan); }
@@ -127,6 +133,17 @@ main.home > * { max-width: 980px; }
 .tree a.here { background: var(--mark); font-weight: 600; }
 .tree a .seen { margin-left: auto; color: var(--faint); font-size: 11px; visibility: hidden; }
 .tree a.visited .seen { visibility: visible; }
+.tree a.anc { color: var(--muted); font-size: 13px; }
+.tree a.more { color: var(--faint); font: 12px var(--sans); }
+.tree > li > a.anc { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 600; }
+
+/* the areas: tabs at the top, in the drawer on narrow screens */
+nav.areas { display: flex; gap: 2px; font: 14px var(--sans); }
+nav.areas a { padding: 6px 10px; border-radius: 6px; text-decoration: none; color: var(--muted); white-space: nowrap; }
+nav.areas a:hover { color: var(--text); background: var(--mark); }
+nav.areas a.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--titan); border-radius: 6px 6px 0 0; }
+.areas-m { display: none; }
+a.icon { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 
 .rail h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); }
 .rail ol, .rail ul { list-style: none; margin: 0 0 24px; padding: 0; }
@@ -158,6 +175,27 @@ a.chip:hover { border-color: var(--titan); color: var(--text); }
 .row { margin: .35rem 0; }
 .key { color: var(--faint); font-size: 13px; margin-right: .4rem; }
 .src, .status { color: var(--faint); font-size: 13px; }
+a.ext::after { content: "↗"; font-size: .85em; margin-left: 2px; text-decoration: none; display: inline-block; }
+
+/* kinds: a symbol, and a frame by family – what defines, what claims, a case, a data type, an explanation */
+.kb { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+.ki { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4;
+  stroke-linecap: round; stroke-linejoin: round; }
+.kind .ki { width: 12px; height: 12px; }
+.decl.fam-def, .pop.fam-def { border-color: color-mix(in srgb, var(--titan) 45%, var(--line)); }
+.decl.fam-claim, .pop.fam-claim { border-left: 3px solid var(--titan); border-radius: 0 10px 10px 0; }
+.decl.fam-case, .pop.fam-case { border: 1px dashed var(--titan); }
+.decl.fam-type, .pop.fam-type { border: 1px dotted var(--titan); }
+.decl.fam-note { background: transparent; border-color: transparent; padding-left: 0; padding-right: 0; }
+.decl.fam-note .text { font-style: italic; }
+.decl.fam-path, .pop.fam-path { border-radius: 18px; }
+.decl.fam-doc, .pop.fam-doc { background: var(--sunk); }
+.pop.help { font: 14px/1.5 var(--sans); width: min(24rem, calc(100vw - 16px)); }
+.pop.help .more { display: inline-block; margin-top: 6px; color: var(--muted); font-size: 13px; }
+.kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 14px; }
+.kinds .decl { margin: 0; }
+.kinds .decl p { margin: .3rem 0 0; font-size: 16px; }
+.kinds .decl .ex { font: 13px var(--sans); color: var(--faint); margin-top: .5rem; }
 .src { margin-top: .3rem; }
 .ok { color: var(--ok); font-weight: 600; }
 .open { color: var(--open); font-weight: 600; }
@@ -316,12 +354,18 @@ a.node:hover { border-color: var(--titan); }
 @media (max-width: 1180px) {
   .layout { grid-template-columns: 240px minmax(0, 1fr); }
   aside.rail { display: none; }
+  nav.areas a { padding: 6px 7px; }
 }
 @media (max-width: 820px) {
   .layout, .layout.wide { grid-template-columns: minmax(0, 1fr); }
   #menu { display: inline-block; }
   .brand span { display: none; }
+  nav.areas { display: none; }
+  .areas-m { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; font: 14px var(--sans); }
+  .areas-m a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
+  .areas-m a.on { border-color: var(--titan); font-weight: 600; }
   nav.side { position: fixed; top: var(--top); left: 0; bottom: 0; width: min(320px, 86vw); max-height: none;
+    height: calc(100dvh - var(--top));
     background: var(--ground); z-index: 30; transform: translateX(-100%); transition: transform .2s;
     box-shadow: 0 0 40px rgba(0,0,0,.25); }
   body.menu nav.side { transform: none; }
@@ -336,6 +380,31 @@ a.node:hover { border-color: var(--titan); }
   .decl { break-inside: avoid; border: 0; padding: 0; }
 }
 "#;
+
+/// The symbols of the kinds, drawn for verkodo (16 × 16, a line in the text's colour); every page carries them once,
+/// a kind refers to one with `<use href="#k-…">`.
+pub const SPRITE: &str = concat!(
+    r#"<svg xmlns="http://www.w3.org/2000/svg" style="display:none"><defs>"#,
+    r#"<symbol id="k-concept" viewBox="0 0 16 16"><path d="M5.6 10.6a4.2 4.2 0 1 1 4.8 0V12H5.6zM6.2 14.2h3.6"/></symbol>"#,
+    r#"<symbol id="k-variant" viewBox="0 0 16 16"><path d="M2.5 6h.1M2.5 10h.1M5.5 6h8M5.5 10h8"/></symbol>"#,
+    r#"<symbol id="k-theorem" viewBox="0 0 16 16"><path d="M4 2.5v11M4 8h9"/></symbol>"#,
+    r#"<symbol id="k-example" viewBox="0 0 16 16"><path d="M5.5 2h5M6.7 2v4.2L2.8 13.5h10.4L9.3 6.2V2M4.6 10.2h6.8"/></symbol>"#,
+    r#"<symbol id="k-remark" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></symbol>"#,
+    r#"<symbol id="k-norm" viewBox="0 0 16 16"><path d="M10.5 3.6C10 2.6 9.1 2 8 2 6.6 2 5.6 2.9 5.6 4c0 2.6 5 2.4 5 5.2 0 1-.8 1.8-2 2M5.5 12.4c.5 1 1.4 1.6 2.5 1.6 1.4 0 2.4-.9 2.4-2 0-2.6-5-2.4-5-5.2 0-1 .8-1.8 2-2"/></symbol>"#,
+    r#"<symbol id="k-input" viewBox="0 0 16 16"><path d="M1.5 8h7.5M6.5 5.5 9 8l-2.5 2.5M9.5 2.5h4v11h-4"/></symbol>"#,
+    r#"<symbol id="k-judgement" viewBox="0 0 16 16"><path d="M8 2.5 13.5 8 8 13.5 2.5 8zM6.6 6.6a1.5 1.5 0 1 1 1.4 2v.7M8 10.9h.1"/></symbol>"#,
+    r#"<symbol id="k-constant" viewBox="0 0 16 16"><path d="M6 2.5 5 13.5M11 2.5l-1 11M2.5 6h11M2 10h11"/></symbol>"#,
+    r#"<symbol id="k-rule" viewBox="0 0 16 16"><path d="M3 6h10M3 10h10"/></symbol>"#,
+    r#"<symbol id="k-duty" viewBox="0 0 16 16"><path d="M8 2.5v11M5 13.5h6M3 4.5h10M3 4.5 1.2 9h3.6zM13 4.5 11.2 9h3.6z"/></symbol>"#,
+    r#"<symbol id="k-enum" viewBox="0 0 16 16"><path d="M2.6 4h.1M2.6 8h.1M2.6 12h.1M5.5 4h8M5.5 8h8M5.5 12h8"/></symbol>"#,
+    r#"<symbol id="k-value" viewBox="0 0 16 16"><path d="M8 5.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6z"/></symbol>"#,
+    r#"<symbol id="k-unit" viewBox="0 0 16 16"><path d="M1.8 11.2 11.2 1.8l3 3-9.4 9.4zM4.6 8.4l1.4 1.4M6.8 6.2l1 1M9 4l1.4 1.4"/></symbol>"#,
+    r#"<symbol id="k-record" viewBox="0 0 16 16"><path d="M2.5 3h11v10h-11zM2.5 6.5h11M6.5 6.5V13"/></symbol>"#,
+    r#"<symbol id="k-field" viewBox="0 0 16 16"><path d="M2.5 5.5h11v5h-11zM5 8h4"/></symbol>"#,
+    r#"<symbol id="k-path" viewBox="0 0 16 16"><path d="M3.5 12.5h6a2.5 2.5 0 0 0 0-5h-3a2.5 2.5 0 0 1 0-5h6M2 12.5h.1M14 2.5h.1"/></symbol>"#,
+    r#"<symbol id="k-document" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3M5.5 8h5M5.5 10.5h5"/></symbol>"#,
+    "</defs></svg>"
+);
 
 /// The page's behaviour, all optional – without it the pages are plain linked HTML. Reads `window.VK` (a site's
 /// `assets/data.js`, the cards apart in `assets/cards.js`) or the JSON in `#vk-data` (a single page): `cards` (id → card markup), `search` (entries [id,
@@ -390,7 +459,29 @@ pub const JS: &str = r#"
     });
     return cardsLoad;
   }
+  // what a kind is: its explanation, and on a site the page on how to read
+  const site = !document.getElementById('vk-data');
+  function openHelp(anchor, level) {
+    const text = W('help_' + anchor.dataset.kind);
+    if (!text || text === 'help_' + anchor.dataset.kind) return;
+    close(level);
+    const el = document.createElement('div');
+    el.className = 'pop help';
+    el.innerHTML = `<div>${esc(text)}</div>` + (site ? `<a class="more" href="how-to-read.html#kind-${esc(anchor.dataset.kind)}">${esc(W('more'))} →</a>` : '');
+    place(el, anchor, level);
+  }
+  function place(el, anchor, level) {
+    el.dataset.level = String(level + 1);
+    document.body.appendChild(el);
+    const r = anchor.getBoundingClientRect();
+    const maxX = window.scrollX + document.documentElement.clientWidth - el.offsetWidth - 8;
+    el.style.left = Math.max(window.scrollX + 8, Math.min(r.left + window.scrollX, maxX)) + 'px';
+    const below = r.bottom + 6 + el.offsetHeight < window.innerHeight || r.top < el.offsetHeight + 6;
+    el.style.top = (below ? r.bottom + window.scrollY + 6 : r.top + window.scrollY - el.offsetHeight - 6) + 'px';
+    stack.push({ el, anchor });
+  }
   function open(anchor, level) {
+    if (anchor.dataset.kind) { openHelp(anchor, level); return; }
     const id = anchor.dataset.ref;
     if (id && !cards()) {
       if (!cardsLoad) loadCards().then(() => { if (cards() && wanted === anchor) open(anchor, level); });
@@ -404,6 +495,8 @@ pub const JS: &str = r#"
       const card = cards()[id];
       if (!card) return;
       el.innerHTML = card;
+      const kb = el.querySelector('.kb');
+      if (kb) el.classList.add('fam-' + kb.dataset.fam);
       // links in a card carry their id; where they lead comes from the search
       el.querySelectorAll('a.ref[data-ref]:not([href])').forEach((a) => {
         const e = where.get(a.dataset.ref);
@@ -417,19 +510,12 @@ pub const JS: &str = r#"
     } else if (anchor.dataset.tip) {
       el.classList.add('tip'); el.textContent = anchor.dataset.tip;
     } else return;
-    el.dataset.level = String(level + 1);
-    document.body.appendChild(el);
-    const r = anchor.getBoundingClientRect();
-    const maxX = window.scrollX + document.documentElement.clientWidth - el.offsetWidth - 8;
-    el.style.left = Math.max(window.scrollX + 8, Math.min(r.left + window.scrollX, maxX)) + 'px';
-    const below = r.bottom + 6 + el.offsetHeight < window.innerHeight || r.top < el.offsetHeight + 6;
-    el.style.top = (below ? r.bottom + window.scrollY + 6 : r.top + window.scrollY - el.offsetHeight - 6) + 'px';
-    stack.push({ el, anchor });
+    place(el, anchor, level);
   }
   if (!touch) {
     document.addEventListener('mouseover', (e) => {
       clearTimeout(timer);
-      const a = e.target.closest && e.target.closest('.ref');
+      const a = e.target.closest && e.target.closest('.ref, .kb');
       if (a) {
         const l = levelOf(a);
         if (stack[l] && stack[l].anchor === a) { close(l + 1); return; }
@@ -442,8 +528,9 @@ pub const JS: &str = r#"
     });
   }
   document.addEventListener('click', (e) => {
-    const a = e.target.closest && e.target.closest('.ref');
-    if (a && (touch || !a.getAttribute('href'))) {
+    const a = e.target.closest && e.target.closest('.ref, .kb');
+    // with a mouse a kind explains itself on hover, so a click goes on – into a part, to a tile
+    if (a && (touch || (!a.getAttribute('href') && !a.dataset.kind))) {
       e.preventDefault();
       const l = levelOf(a);
       if (stack[l] && stack[l].anchor === a) close(l); else open(a, l);
@@ -460,7 +547,8 @@ pub const JS: &str = r#"
   const box = document.getElementById('results');
   const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ß/g, 'ss');
   const entries = (VK.search || []).map((e) => ({ e, label: norm(e[1]), id: norm(e[0]), where: norm(e[4] || '') }));
-  let hits = [], cur = 0;
+  let hits = [], cur = 0, fKind = '', fArea = '';
+  const areaOf = (e) => e[0].split('.')[0];
   function score(x, words) {
     let s = 0;
     for (const w of words) {
@@ -478,15 +566,33 @@ pub const JS: &str = r#"
   function show() {
     const words = norm(q.value).split(/\s+/).filter(Boolean);
     if (!words.length) { hideResults(); return; }
-    hits = entries.map((x) => [score(x, words), x]).filter((p) => p[0] > 0).sort((a, b) => b[0] - a[0]).slice(0, 14).map((p) => p[1].e);
+    const all = entries.map((x) => [score(x, words), x]).filter((p) => p[0] > 0).sort((a, b) => b[0] - a[0]).map((p) => p[1].e);
+    // filters by kind and by area, from what was found
+    const count = (key) => all.reduce((m, e) => (m[key(e)] = (m[key(e)] || 0) + 1, m), {});
+    const kinds = count((e) => e[2]), areas = count(areaOf);
+    if (fKind && !kinds[fKind]) fKind = '';
+    if (fArea && !areas[fArea]) fArea = '';
+    hits = all.filter((e) => (!fKind || e[2] === fKind) && (!fArea || areaOf(e) === fArea)).slice(0, 14);
     cur = 0;
-    box.innerHTML = hits.length
+    const chip = (attr, val, on, label, n) => `<button type="button" class="chip${on ? ' on' : ''}" data-${attr}="${esc(val)}">${esc(label)}${n ? ` <span class="n">${n}</span>` : ''}</button>`;
+    const filters = all.length > 6 ? `<div class="filters">`
+      + (Object.keys(areas).length > 1 ? chip('area', '', !fArea, W('all_kinds')) + Object.keys(areas).map((a) => chip('area', a, fArea === a, (VK.areas || {})[a] || a, areas[a])).join('') + '<span class="sep"></span>' : '')
+      + chip('kind', '', !fKind, W('all_kinds')) + Object.keys(kinds).map((k) => chip('kind', k, fKind === k, W(k), kinds[k])).join('')
+      + `</div>` : '';
+    box.innerHTML = filters + (hits.length
       ? hits.map((h, i) => `<a href="${esc(h[3])}" class="${i === 0 ? 'on' : ''}"><span class="chip kind-tag">${esc(W(h[2]))}</span><span>${esc(h[1])}</span><span class="where">${esc(h[4] || '')}</span></a>`).join('')
-      : `<div class="none">${esc(W('nothing'))}</div>`;
+      : `<div class="none">${esc(W('nothing'))}</div>`);
     box.hidden = false;
   }
   if (q && box) {
     q.addEventListener('input', show);
+    box.addEventListener('mousedown', (e) => {
+      const b = e.target.closest('button[data-kind], button[data-area]');
+      if (!b) return;
+      e.preventDefault();
+      if (b.dataset.kind !== undefined) fKind = b.dataset.kind; else fArea = b.dataset.area;
+      show();
+    });
     q.addEventListener('focus', () => { if (q.value) show(); });
     q.addEventListener('keydown', (e) => {
       const links = box.querySelectorAll('a');
@@ -499,7 +605,8 @@ pub const JS: &str = r#"
       } else if (e.key === 'Enter' && links[cur]) { e.preventDefault(); location.href = links[cur].getAttribute('href'); }
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === '/' && document.activeElement !== q && !/input|textarea|select/i.test(document.activeElement.tagName)) {
+      const cmdK = e.key === 'k' && (e.metaKey || e.ctrlKey);
+      if (cmdK || (e.key === '/' && document.activeElement !== q && !/input|textarea|select/i.test(document.activeElement.tagName))) {
         e.preventDefault(); q.focus(); q.select();
       }
     });
@@ -623,7 +730,7 @@ pub const JS: &str = r#"
   // a value as people write it: numbers grouped in the page's language, money with two decimals and "€", truth values
   // as words, values of enumerations by their label
   const lang = root.lang || 'de';
-  function show(v, k) {
+  function showValue(v, k) {
     if (v === 'true' || v === 'false') return W(v === 'true' ? 'yes' : 'no');
     const n = Number(String(v).replace(/\s*EUR$/, ''));
     if (String(v).trim() !== '' && Number.isFinite(n)) {
@@ -649,7 +756,7 @@ pub const JS: &str = r#"
       for (const i of form.inputs) inputs[i.n] = read(box, i, i.n);
       const steps = call('vk_eval', { norm: id, inputs }) || [];
       const by = new Map(steps.map((s) => [s.id, s]));
-      const val = (s) => s ? `<span class="${s.known ? '' : 'unknown'}">${esc(s.known ? show(s.value, (form.types || {})[s.id]) : s.value)}</span>` : '';
+      const val = (s) => s ? `<span class="${s.known ? '' : 'unknown'}">${esc(s.known ? showValue(s.value, (form.types || {})[s.id]) : s.value)}</span>` : '';
       const res = form.results.map((r) => by.get(r)).filter(Boolean);
       const rest = steps.filter((s) => s.kind !== 'input' && s.kind !== 'judgement');
       out.innerHTML = `<h4>${esc(W('results'))}</h4><dl class="res">${res.map((s) => `<dt>${termLink(s.id, s.label)}</dt><dd>${val(s)}</dd>`).join('')}</dl>`
@@ -735,3 +842,20 @@ pub const JS: &str = r#"
   }
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    /// The script is one scope: a second function of the same name would replace the first unnoticed (it did – the
+    /// calculator's `show` once silenced the search).
+    #[test]
+    fn the_script_names_each_function_once() {
+        let mut seen = std::collections::BTreeSet::new();
+        for part in super::JS.split("function ").skip(1) {
+            let name: String = part.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            if !name.is_empty() {
+                assert!(seen.insert(name.clone()), "function {name} is declared twice");
+            }
+        }
+        assert!(seen.contains("show") && seen.contains("showValue"));
+    }
+}
