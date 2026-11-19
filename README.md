@@ -6,7 +6,7 @@ verkodo writes knowledge down formally instead of as prose – mathematics first
 
 verkodo is at its beginning: a first version of the language reads `.vk` files, checks them, lets Lean check the
 proofs and writes a site to read in – articles, paths, search, a calculator for every norm – in which every term
-explains itself on hover. Version 0.5 is on crates.io.
+explains itself on hover. Version 0.6 is on crates.io.
 The idea and the plan are in the [whitepaper](https://github.com/verkodo/whitepaper). The knowledge itself –
 mathematics and law, sourced and checked – grows in [verkodo/sciaro](https://github.com/verkodo/sciaro) (Esperanto
 for a body of knowledge); [examples/](examples/) here only shows the language.

@@ -2,7 +2,7 @@
   "name": "verkodo",
   "displayName": "verkodo",
   "description": "verkodo – mathematics and law written formally, checked by machine: highlighting, and the verkodo language server (diagnostics, hover, go to definition, outline, formatting, Lean on save).",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "falkoss",
   "license": "AGPL-3.0-or-later",
   "repository": {
