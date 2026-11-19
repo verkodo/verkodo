@@ -905,6 +905,7 @@ impl R<'_> {
     }
 
     /// The kind of a declaration as a key: its modality for a rule that is one, else its kind.
+    #[cfg(feature = "html")]
     fn kind_key(&self, sym: usize) -> &'static str {
         match self.modality(sym) {
             Some(m) => m.keyword(),
@@ -929,6 +930,7 @@ impl R<'_> {
         )
     }
 
+    #[cfg(any(feature = "typst", feature = "markdown"))]
     fn kind_word(&self, sym: usize) -> &'static str {
         match self.modality(sym) {
             Some(m) => self.w(m.keyword()),
@@ -965,6 +967,7 @@ impl R<'_> {
     }
 }
 
+#[cfg(feature = "html")]
 /// The family of a kind, which its frame shows: what defines (`def`), what claims (`claim`), a case (`case`), a data
 /// type (`type`), an explanation (`note`), a path (`path`), a document (`doc`).
 pub(crate) fn family(key: &str) -> &'static str {
@@ -979,6 +982,7 @@ pub(crate) fn family(key: &str) -> &'static str {
     }
 }
 
+#[cfg(feature = "html")]
 /// The symbol of a kind: an id in [`assets::SPRITE`].
 pub(crate) fn icon(key: &'static str) -> &'static str {
     match key {
@@ -989,6 +993,7 @@ pub(crate) fn icon(key: &'static str) -> &'static str {
     }
 }
 
+#[cfg(feature = "html")]
 /// The kinds in the order the page on how to read explains them.
 pub(crate) const KINDS: &[&str] = &[
     "concept",
