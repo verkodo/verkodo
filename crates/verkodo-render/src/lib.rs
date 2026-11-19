@@ -49,7 +49,7 @@ pub fn write_site(
     wasm: Option<&[u8]>,
 ) -> io::Result<Vec<PathBuf>> {
     let layout = site::Layout::new(ws, a, lang, false);
-    let html = Html { hrefs: layout.hrefs.clone() };
+    let html = Html { hrefs: layout.hrefs.clone(), card: false };
     let r = R { ws, a, report, lang, f: &html };
     let assets_dir = out.join("assets");
     std::fs::create_dir_all(assets_dir.join("fonts"))?;
@@ -68,7 +68,8 @@ pub fn write_site(
     }
     put(assets_dir.join("site.css"), format!("{}{}", assets::font_faces("fonts/"), assets::CSS).as_bytes())?;
     put(assets_dir.join("site.js"), assets::JS.as_bytes())?;
-    put(assets_dir.join("data.js"), format!("window.VK={};", r.data_json(&layout, wasm.is_some())).as_bytes())?;
+    put(assets_dir.join("data.js"), format!("window.VK={};", r.data_json(&layout, wasm.is_some(), false)).as_bytes())?;
+    put(assets_dir.join("cards.js"), format!("window.VK_CARDS={};", r.cards_json()).as_bytes())?;
     if let Some(wasm) = wasm {
         put(assets_dir.join("verkodo.wasm"), wasm)?;
         put(assets_dir.join("sources.js"), r.sources_js().as_bytes())?;
@@ -87,7 +88,7 @@ pub fn write_site(
 /// script inline, in one `<style>` and one `<script>`.
 pub fn index_html(ws: &Sources, a: &Analysis, report: Option<&Report>, lang: &str) -> String {
     let layout = site::Layout::new(ws, a, lang, true);
-    let html = Html { hrefs: layout.hrefs.clone() };
+    let html = Html { hrefs: layout.hrefs.clone(), card: false };
     R { ws, a, report, lang, f: &html }.home(&layout, true, "verkodo")
 }
 
@@ -95,7 +96,7 @@ pub fn index_html(ws: &Sources, a: &Analysis, report: Option<&Report>, lang: &st
 /// The page of a path as one HTML document (`path` is its symbol), like [`index_html`].
 pub fn path_html(ws: &Sources, a: &Analysis, report: Option<&Report>, path: usize, lang: &str) -> String {
     let layout = site::Layout::new(ws, a, lang, true);
-    let html = Html { hrefs: layout.hrefs.clone() };
+    let html = Html { hrefs: layout.hrefs.clone(), card: false };
     R { ws, a, report, lang, f: &html }.reading(&layout, path, true, "verkodo")
 }
 
@@ -255,9 +256,10 @@ impl R<'_> {
             "trace" => ("Rechenweg", "How it was computed"),
             "inputs_word" => ("Eingaben", "Inputs"),
             "loading" => ("Lädt …", "Loading …"),
-            "calc_failed" => (
-                "Der Rechner braucht die Seite über einen Webserver (nicht als Datei geöffnet).",
-                "The calculator needs the page from a web server (not opened as a file).",
+            "calc_failed" => ("Der Rechner ließ sich nicht laden.", "The calculator could not be loaded."),
+            "calc_file" => (
+                "Der Rechner läuft, wenn die Seite von einem Webserver kommt – nicht als Datei geöffnet (z. B. python3 -m http.server im Ordner der Seite).",
+                "The calculator runs when the page comes from a web server, not opened as a file (e.g. python3 -m http.server in the site's folder).",
             ),
             "yes" => ("ja", "yes"),
             "no" => ("nein", "no"),

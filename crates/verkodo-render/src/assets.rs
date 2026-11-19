@@ -338,7 +338,7 @@ a.node:hover { border-color: var(--titan); }
 "#;
 
 /// The page's behaviour, all optional – without it the pages are plain linked HTML. Reads `window.VK` (a site's
-/// `assets/data.js`) or the JSON in `#vk-data` (a single page): `cards` (id → card markup), `search` (entries [id,
+/// `assets/data.js`, the cards apart in `assets/cards.js`) or the JSON in `#vk-data` (a single page): `cards` (id → card markup), `search` (entries [id,
 /// label, kind, url, where]), `forms`, `calc` and `words`. A fixed text: the static web editor allows it by its hash. Progress and the theme stay in this
 /// browser (localStorage); nothing leaves it.
 pub const JS: &str = r#"
@@ -346,8 +346,9 @@ pub const JS: &str = r#"
   const VK = window.VK || (() => {
     const d = document.getElementById('vk-data');
     try { return d ? JSON.parse(d.textContent) : null; } catch (e) { return null; }
-  })() || { cards: {}, search: [], words: {} };
+  })() || { search: [], words: {} };
   const W = (k) => (VK.words && VK.words[k]) || k;
+  const where = new Map((VK.search || []).map((e) => [e[0], e]));
   const store = {
     get(k, d) { try { const v = localStorage.getItem('verkodo:' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem('verkodo:' + k, JSON.stringify(v)); } catch (e) {} },
@@ -375,17 +376,39 @@ pub const JS: &str = r#"
 
   // nested hover cards: a card opens over a term; terms in the card open the next one
   const stack = [];
-  let timer = null;
+  let timer = null, wanted = null;
   const close = (level) => { while (stack.length > level) stack.pop().el.remove(); };
   const levelOf = (n) => { const p = n.closest && n.closest('.pop'); return p ? Number(p.dataset.level) : 0; };
+  // the cards: in the data of a single page, on a site in assets/cards.js, loaded when a card is first wanted
+  let cardsLoad = null;
+  const cards = () => VK.cards || window.VK_CARDS;
+  function loadCards() {
+    if (!cardsLoad) cardsLoad = new Promise((done) => {
+      const s = document.createElement('script');
+      s.src = 'assets/cards.js'; s.onload = done; s.onerror = done;
+      document.head.appendChild(s);
+    });
+    return cardsLoad;
+  }
   function open(anchor, level) {
+    const id = anchor.dataset.ref;
+    if (id && !cards()) {
+      if (!cardsLoad) loadCards().then(() => { if (cards() && wanted === anchor) open(anchor, level); });
+      wanted = anchor;
+      return;
+    }
     close(level);
     const el = document.createElement('div');
     el.className = 'pop';
-    const id = anchor.dataset.ref;
     if (id) {
-      if (!VK.cards[id]) return;
-      el.innerHTML = VK.cards[id];
+      const card = cards()[id];
+      if (!card) return;
+      el.innerHTML = card;
+      // links in a card carry their id; where they lead comes from the search
+      el.querySelectorAll('a.ref[data-ref]:not([href])').forEach((a) => {
+        const e = where.get(a.dataset.ref);
+        if (e) a.setAttribute('href', e[3]); else { a.setAttribute('role', 'button'); a.tabIndex = 0; }
+      });
       if (anchor.getAttribute('href') && touch) {
         const go = document.createElement('a');
         go.className = 'go'; go.href = anchor.getAttribute('href'); go.textContent = W('go') + ' →';
@@ -414,6 +437,7 @@ pub const JS: &str = r#"
         return;
       }
       const l = levelOf(e.target);
+      wanted = null;
       timer = setTimeout(() => close(l), 450);
     });
   }
@@ -557,7 +581,6 @@ pub const JS: &str = r#"
     engine = call;
     return call;
   }
-  const where = new Map((VK.search || []).map((e) => [e[0], e]));
   const termLink = (id, label) => {
     const e = where.get(id);
     return `<a class="ref" data-ref="${esc(id)}"${e ? ` href="${esc(e[3])}"` : ''}>${esc(label || (e && e[1]) || id.split('.').pop())}</a>`;
@@ -644,6 +667,8 @@ pub const JS: &str = r#"
     document.querySelectorAll('.calc[data-norm]').forEach((box) => {
       if (!(VK.forms || {})[box.dataset.norm]) return;
       box.hidden = false;
+      // opened as a file, the browser does not load the WebAssembly: say so instead of a button that fails
+      if (location.protocol === 'file:') { box.innerHTML = `<p class="msg">${esc(W('calc_file'))}</p>`; return; }
       box.innerHTML = `<button class="btn" type="button">▶ ${esc(W('try'))}</button>`;
       box.querySelector('button').addEventListener('click', () => openCalc(box), { once: true });
     });

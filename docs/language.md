@@ -22,6 +22,16 @@ One shared **knowledge layer** carries two **logic profiles**:
 A file starts with `module a.b`. Every declaration gets the stable id `<module>.<name>`, variants and members
 `<module>.<name>.<part>`. Names resolve in the module first, then as full ids. Files end in `.vk`.
 
+A module may carry its own `label` and `source`, in braces or indented below the `module` line – the title its page
+gets (otherwise derived from the module's name and its main declaration):
+
+```text
+module de.einigvtr.a2 original de, en
+  label de "Art. 2 Einigungsvertrag"
+  label en "Art. 2 Unification Treaty"
+  source "Einigungsvertrag"
+```
+
 ## Two ways of writing
 
 verkodo can be written with delimiters, where line breaks do not matter: `{ … }` around blocks, `"…"` around text

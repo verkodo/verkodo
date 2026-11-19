@@ -14,7 +14,7 @@ use verkodo_syntax::ast::Item;
 
 use super::R;
 use crate::assets;
-use crate::format::esc;
+use crate::format::{Html, esc};
 
 /// Where the pieces of a site go: one article per module, one page per path.
 pub(crate) struct Layout {
@@ -72,16 +72,20 @@ impl Layout {
         // display names of the groups: a word of the sources or labels in the group that is the folder's name in
         // another case ("ustg" → "UStG"), else the folder's name
         let mut words: BTreeMap<String, String> = BTreeMap::new();
-        for (i, _) in a.symbols.iter().enumerate() {
+        let module_texts = ws.asts.iter().flat_map(|ast| {
+            ast.meta.labels.iter().map(|t| t.value.clone()).chain(ast.meta.sources.iter().map(|(s, _)| s.clone()))
+        });
+        let item_texts = (0..a.symbols.len()).flat_map(|i| {
             let mut texts: Vec<String> = a.label(ws, i, lang).into_iter().collect();
             if let Loc::Item { file, item } = a.symbols[i].loc {
                 texts.extend(item_sources(&ws.asts[file].items[item]));
             }
-            for t in texts {
-                for w in t.split(|c: char| !c.is_alphanumeric()) {
-                    if w.len() > 1 && w.chars().any(char::is_uppercase) {
-                        words.entry(w.to_lowercase()).or_insert_with(|| w.to_string());
-                    }
+            texts
+        });
+        for t in module_texts.chain(item_texts) {
+            for w in t.split(|c: char| !c.is_alphanumeric()) {
+                if w.len() > 1 && w.chars().any(char::is_uppercase) {
+                    words.entry(w.to_lowercase()).or_insert_with(|| w.to_string());
                 }
             }
         }
@@ -145,9 +149,22 @@ impl Layout {
                 segs.get(1..segs.len().saturating_sub(1)).unwrap_or_default().iter().map(|s| display(s)).collect();
             let act = group_names.last().cloned().unwrap_or_default();
             let numbered = section_number(last).map(|n| if act.is_empty() { n } else { format!("{n} {act}") });
-            let (title, lead) = match numbered {
-                Some(n) => (n, main),
-                None => (main.unwrap_or_else(|| id.clone()), None),
+            // the module's own label first (`module m { label de "…" }`), the main declaration then as its lead
+            let own = ast
+                .meta
+                .labels
+                .iter()
+                .find(|t| t.lang.text == lang)
+                .or_else(|| ast.meta.labels.iter().find(|t| t.lang.text == "en"))
+                .or_else(|| ast.meta.labels.first())
+                .map(|t| t.value.clone());
+            let (title, lead) = match (own, numbered) {
+                (Some(t), _) => {
+                    let lead = main.filter(|m| *m != t);
+                    (t, lead)
+                }
+                (None, Some(n)) => (n, main),
+                (None, None) => (main.unwrap_or_else(|| id.clone()), None),
             };
             module_of_file[file] = Some(modules.len());
             modules.push(Module {
@@ -251,6 +268,7 @@ impl<'a> R<'a> {
             "inputs_word",
             "loading",
             "calc_failed",
+            "calc_file",
             "yes",
             "no",
             "not_given",
@@ -362,13 +380,22 @@ impl<'a> R<'a> {
         format!("window.VK_SOURCES={{\"lang\":\"{}\",\"files\":[{}]}};", json_esc(self.lang), files.join(","))
     }
 
-    /// The data of the script as JSON: the cards, the search, the norms to try (`calc`: whether the calculator is
-    /// there) and the words of the script. A site loads it as `assets/data.js` (`window.VK = …`); a single page carries
-    /// it in a `<script type="application/json">`, which is data, not code – no policy has to allow it.
-    pub(crate) fn data_json(&self, l: &Layout, calc: bool) -> String {
+    /// The hover cards as JSON (id → markup), written lean: their links carry only the id – the script finds where
+    /// they lead in the search – and a proof shows only Lean's verdict; the whole stands on the declaration's page.
+    pub(crate) fn cards_json(&self) -> String {
+        let f = Html { hrefs: Vec::new(), card: true };
+        let r = R { ws: self.ws, a: self.a, report: self.report, lang: self.lang, f: &f };
         let cards: Vec<String> = (0..self.a.symbols.len())
-            .map(|s| format!("\"{}\":\"{}\"", json_esc(&self.a.symbols[s].id), json_esc(&self.card(s))))
+            .map(|s| format!("\"{}\":\"{}\"", json_esc(&self.a.symbols[s].id), json_esc(&r.card(s))))
             .collect();
+        format!("{{{}}}", cards.join(","))
+    }
+
+    /// The data of the script as JSON: the search, the norms to try (`calc`: whether the calculator is there), the
+    /// words of the script and – with `cards` – the hover cards. A site loads it as `assets/data.js` (`window.VK = …`)
+    /// and the cards apart, when a card is first wanted (`assets/cards.js`); a single page carries all of it in a
+    /// `<script type="application/json">`, which is data, not code – no policy has to allow it.
+    pub(crate) fn data_json(&self, l: &Layout, calc: bool, cards: bool) -> String {
         let search: Vec<String> = (0..self.a.symbols.len())
             .map(|s| {
                 let sym = &self.a.symbols[s];
@@ -387,9 +414,9 @@ impl<'a> R<'a> {
                 )
             })
             .collect();
+        let cards = if cards { format!("\"cards\":{},", self.cards_json()) } else { String::new() };
         format!(
-            "{{\"cards\":{{{}}},\"search\":[{}],\"calc\":{calc},\"forms\":{},\"words\":{}}}",
-            cards.join(","),
+            "{{{cards}\"search\":[{}],\"calc\":{calc},\"forms\":{},\"words\":{}}}",
             search.join(","),
             self.forms_json(),
             self.words_json()
@@ -543,7 +570,7 @@ impl<'a> R<'a> {
             // host can allow it by its hash (web/vite.config.ts)
             format!(
                 r#"<script type="application/json" id="vk-data">{}</script><script>{}</script>"#,
-                self.data_json(l, false),
+                self.data_json(l, false, true),
                 assets::JS
             )
         } else {
@@ -1080,13 +1107,38 @@ mod tests {
     }
 
     #[test]
+    fn a_module_with_its_own_label_is_headed_by_it() {
+        let src = r#"module law.vertrag.a2 original de, en {
+              label de "Art. 2 Vertrag"
+              label en "Art. 2 Treaty"
+              source "Vertrag"
+            }
+            norm day { label de "Feiertag" label en "Holiday" input on : date { label en "Day" }
+              rule holiday : bool = month(on) == 10 { label en "Holiday" } }"#;
+        let ws = Sources::from_sources(vec![("a2.vk".into(), src.into())]);
+        let a = verkodo_core::analyze(&ws);
+        let de = Layout::new(&ws, &a, "de", false);
+        assert_eq!(de.modules[0].title, "Art. 2 Vertrag");
+        assert_eq!(de.modules[0].lead.as_deref(), Some("Feiertag"));
+        assert_eq!(de.modules[0].groups, ["Vertrag"], "the module's source names the group");
+        assert_eq!(Layout::new(&ws, &a, "fr", false).modules[0].title, "Art. 2 Treaty", "English is the fallback");
+    }
+
+    #[test]
     fn a_site_has_its_pages_and_a_single_page_carries_one_style_and_one_script() {
         let (ws, a) = sample();
         let dir = std::env::temp_dir().join(format!("verkodo-site-{}", std::process::id()));
         let written = crate::write_site(&ws, &a, None, &dir, "en", "Test", Some(b"\0asm")).unwrap();
         let names: Vec<String> =
             written.iter().map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/")).collect();
-        for want in ["index.html", "law.act.p1.html", "law.act.p2.html", "law.act.p2.guide.html", "assets/data.js"] {
+        for want in [
+            "index.html",
+            "law.act.p1.html",
+            "law.act.p2.html",
+            "law.act.p2.guide.html",
+            "assets/data.js",
+            "assets/cards.js",
+        ] {
             assert!(names.iter().any(|n| n == want), "{want} missing in {names:?}");
         }
         let article = std::fs::read_to_string(dir.join("law.act.p1.html")).unwrap();
@@ -1099,6 +1151,11 @@ mod tests {
         assert!(data.starts_with("window.VK={"));
         assert!(data.contains(r#""law.act.p2.relief":{"inputs":[{"n":"wage","l":"Wage","k":"money""#), "{data}");
         assert!(data.contains(r#""results":["law.act.p2.relief.left"]"#) && data.contains(r#""calc":true"#));
+        // the cards apart, loaded when first wanted; their links carry only the id
+        assert!(!data.contains(r#""cards":"#), "the cards are not in data.js");
+        let cards = std::fs::read_to_string(dir.join("assets/cards.js")).unwrap();
+        assert!(cards.starts_with("window.VK_CARDS={") && cards.contains(r#"data-ref=\"law.act.p1.tax.due\""#));
+        assert!(!cards.contains("href="), "{cards}");
         let sources = std::fs::read_to_string(dir.join("assets/sources.js")).unwrap();
         assert!(sources.contains(r#""path":"0.vk""#) && !sources.contains("p1.vk"), "{sources}");
         assert!(article.contains(r#"class="calc" data-norm="law.act.p1.tax""#));

@@ -382,6 +382,13 @@ impl Parser<'_> {
                     file.originals.extend(self.name());
                 }
             }
+            // the module's own `label` and `source`: in braces or indented below it (a declaration indented below the
+            // module line stays a declaration)
+            let mut meta = Meta::default();
+            if self.at(&Tok::LBrace) || (self.at_kw("label") || self.at_kw("source")) && self.at_block(0) {
+                self.opt_meta_block(0, &mut meta);
+            }
+            file.meta = meta;
         } else if self.at_kw("translation") {
             self.bump();
             file.translation = self.path();

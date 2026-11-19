@@ -49,6 +49,8 @@ pub struct File {
     pub module: Option<Path>,
     /// The languages a module is written in (`module m original de, en`); other languages belong in translations.
     pub originals: Vec<Name>,
+    /// The module's own title and sources (`module m original de { label de "…" }`) – what a page heads it with.
+    pub meta: Meta,
     /// A translation file names the module it translates (`translation m`) instead of being one.
     pub translation: Option<Path>,
     /// What a translation file translates.
